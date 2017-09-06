@@ -52,25 +52,23 @@ import logging
 import traceback
 from glob import glob
 from datetime import datetime, timedelta
-from subprocess import check_output
+from subprocess import check_output, check_call, CalledProcessError
 
 from flo.computation import Computation
-from subprocess import check_call, CalledProcessError
 from flo.time import TimeInterval, check_coverage, round_datetime
 from flo.util import symlink_inputs_to_working_dir
 
-from flo.dawg import DawgCatalog
-
-from flo.sw.viirs_l1 import ViirsL1b2, ViirsGeo2
-from flo.sw.cris_l1b import L1B
+from flo.sw.viirsmend import ViirsMend
 from flo.sw.collocation import CrisViirsCollocation
 
-from flo.sw.lib.glutil import delivered_software, support_software
+from glutil.software import delivered_software, support_software, runscript
+from glutil.nc import nc_compress
+from glutil.hdf import hdf_compress
+from glutil.catalogs import dawg_catalog
+
 from orbnav_client import Client
 
 from utils import create_dir
-
-dawg_catalog = DawgCatalog('DAWG')
 
 # every module should have a LOG object
 LOG = logging.getLogger(__file__)
@@ -236,6 +234,17 @@ class FUSION_MATLAB(Computation):
         vl1b = dawg_catalog.file(satellite, 'VL1BM', granule, version='2.0.2')
         cris = dawg_catalog.file(satellite, 'CL1B', granule, version='v1.0rc8')
 
+        # Generate the mended VIIRS granule.
+        interval = TimeInterval(granule, granule+timedelta(minutes=0))
+        mend_context = ViirsMend().find_contexts(interval)[0]
+        mend_vl1b = ViirsMend().dataset('out').product(
+                   {
+                       'granule': granule,
+                       'platform': mend_context['platform'],
+                       'cloud_version': mend_context['cloud_version']
+                   }
+                )
+
         # Generate the CrIS/VIIRS collocation using the CrIS and VIIRS files from DAWG
         collo_context = {
                'satellite' : satellite,
@@ -250,6 +259,7 @@ class FUSION_MATLAB(Computation):
         # Download the required files, and add them to the task inputs.
         task.input('geo', vgeom)
         task.input('l1b', vl1b)
+        task.input('mend_l1b', mend_vl1b)
         task.input('sounder',  cris)
         task.input('collo', collo)
 
@@ -283,7 +293,7 @@ class FUSION_MATLAB(Computation):
         cmd = '{}/{} {} {} {} {} {} {}'.format(
             bin_dir,
             fusion_binary,
-            support_software.lookup('matlab/2015b').path,
+            support_software.lookup('matlab', '2015b').path,
             geo_file,
             l1b_file,
             ' '.join(sounder_files),
@@ -404,8 +414,11 @@ class FUSION_MATLAB(Computation):
 
         # Move the final fused file to the work directory
         LOG.debug('Found final fused output file "{}", moving to {}...'.format(fused_l1b_file, current_dir))
-        shutil.move(fused_l1b_file, current_dir)
-        fused_l1b_file = glob(pjoin(current_dir, basename(fused_l1b_file)))[0]
+        fused_l1b_file_basename = basename(fused_l1b_file).replace('.bowtie_restored','')
+        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, fused_l1b_file_basename))
+        shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_basename))
+        fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_basename))[0]
+
 
         # Remove the fused_outputs directory
         LOG.debug('Removing the fused_outputs dir {} ...'.format(out_dir))
@@ -500,7 +513,8 @@ class FUSION_MATLAB(Computation):
         # Run the fusion_matlab package
         rc_fusion, matlab_file = self.run_fusion_matlab(
                                                    inputs['geo'],
-                                                   inputs['l1b'],
+                                                   #inputs['l1b'],
+                                                   inputs['mend_l1b'],
                                                    [inputs['sounder']],
                                                    [inputs['collo']],
                                                    **kwargs
@@ -511,7 +525,8 @@ class FUSION_MATLAB(Computation):
 
         # Now that we've computed the Matlab file, convert to a NetCDF file...
         rc_fusion, fused_l1b_file = self.convert_matlab_to_netcdf(matlab_file,
-                                                                  inputs['l1b'],
+                                                                  #inputs['l1b'],
+                                                                  inputs['mend_l1b'],
                                                                   **kwargs)
 
         LOG.debug('convert_matlab_to_netcdf() return value: {}'.format(rc_fusion))

@@ -22,8 +22,8 @@ comp = FUSION_MATLAB()
 granule = datetime(2015, 4, 17, 14)
 interval = TimeInterval(granule, granule+timedelta(minutes=0))
 
-#satellite = 'snpp'
-satellite = 'aqua'
+satellite = 'snpp'
+#satellite = 'aqua'
 delivery_id = '20170831-1'
 
 
