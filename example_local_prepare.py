@@ -24,7 +24,7 @@ interval = TimeInterval(granule, granule+timedelta(minutes=0))
 
 satellite = 'snpp'
 #satellite = 'aqua'
-delivery_id = '20170831-1'
+delivery_id = '20170920-1'
 
 
 def local_execute_example(interval, satellite, delivery_id, skip_prepare=False, skip_execute=False, verbosity=2):
