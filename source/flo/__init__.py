@@ -58,15 +58,8 @@ from flo.builder import WorkflowNotReady
 from timeutil import TimeInterval, datetime, timedelta
 from flo.util import symlink_inputs_to_working_dir
 
-#from flo.sw.viirsmend import ViirsMend
-#from flo.sw.collocation import CrisViirsCollocation
-
 from glutil.software import delivered_software, support_software, runscript
-#from glutil.nc import nc_compress
-#from glutil.hdf import hdf_compress
 from glutil.catalogs import dawg_catalog
-
-from orbnav_client import Client
 
 from utils import create_dir
 
