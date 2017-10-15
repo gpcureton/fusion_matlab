@@ -102,8 +102,8 @@ class FUSION_MATLAB(Computation):
             raise WorkflowNotReady('Unable to find matching MYD03 granule for interval {}'.format(myd03_interval))
         myd03_file = myd03[0]
         LOG.debug('MYD03 granule path: {}'.format(myd03_file.path))
-        if not exists(myd03_file.path):
-            raise WorkflowNotReady('Nominally valid MYD03 path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd03_file.path, granule, myd03_interval))
+        #if not exists(myd03_file.path):
+            #raise WorkflowNotReady('Nominally valid MYD03 path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd03_file.path, granule, myd03_interval))
 
         task.input('geo', myd03_file)
 
@@ -118,8 +118,8 @@ class FUSION_MATLAB(Computation):
             raise WorkflowNotReady('Unable to find matching MYD021KM granule for interval {}'.format(myd021km_interval))
         myd021km_file = myd021km[0]
         LOG.debug('MYD021KM granule path: {}'.format(myd021km_file.path))
-        if not exists(myd021km_file.path):
-            raise WorkflowNotReady('Nominally valid MYD021KM path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd021km_file.path, granule, myd021km_interval))
+        #if not exists(myd021km_file.path):
+            #raise WorkflowNotReady('Nominally valid MYD021KM path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd021km_file.path, granule, myd021km_interval))
 
         task.input('l1b', myd021km_file)
 
@@ -134,8 +134,8 @@ class FUSION_MATLAB(Computation):
             raise WorkflowNotReady('Unable to find matching MYD03 granule for interval {}'.format(myd03_interval))
         myd03_file = myd03[0]
         LOG.debug('MYD03 granule path: {}'.format(myd03_file.path))
-        if not exists(myd03_file.path):
-            raise WorkflowNotReady('Nominally valid MYD03 path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd03_file.path, granule, myd03_interval))
+        #if not exists(myd03_file.path):
+            #raise WorkflowNotReady('Nominally valid MYD03 path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd03_file.path, granule, myd03_interval))
 
         buf = 0 # seconds
         airs_begin = myd03_file.begin_time - timedelta(seconds=buf)
@@ -334,6 +334,8 @@ class FUSION_MATLAB(Computation):
         matlab_file_dt_filespec = kwargs['matlab_file_dt_filespec']
         conversion_bin = kwargs['conversion_bin']
         env = kwargs['env']
+        satellite = kwargs['satellite']
+        granule = kwargs['granule']
 
         rc_fusion = 0
 
@@ -341,6 +343,7 @@ class FUSION_MATLAB(Computation):
         dt_string = dt.strftime(matlab_file_dt_str)
 
         LOG.debug('dt_string = {}'.format(dt_string))
+        LOG.debug('granule = {}'.format(granule))
 
         # Create the output directory
         current_dir = os.getcwd()
@@ -395,12 +398,21 @@ class FUSION_MATLAB(Computation):
         shutil.rmtree(unfused_l1b_dir)
 
         # Move the final fused file to the work directory
-        LOG.debug('Found final fused output file "{}", moving to {}...'.format(fused_l1b_file, current_dir))
-        fused_l1b_file_basename = basename(fused_l1b_file).replace('.bowtie_restored','')
-        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, fused_l1b_file_basename))
-        shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_basename))
-        fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_basename))[0]
+        if satellite=='snpp':
+            fused_l1b_file_new = dt.strftime('VNP02MOD.A%Y%j.%H%M.fsn.CTIME.nc')
+        if satellite=='aqua':
+            fused_l1b_file_new = dt.strftime('MYD021KM.A%Y%j.%H%M.fsn.CTIME.hdf')
 
+        dt_create = datetime.utcnow()
+        fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
+
+        LOG.debug('Found final fused output file "{}", moving to {}...'.format(fused_l1b_file, current_dir))
+        #fused_l1b_file_basename = basename(fused_l1b_file).replace('.bowtie_restored','')
+
+        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, fused_l1b_file_new))
+        shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new))
+        
+        fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_new))[0]
 
         # Remove the fused_outputs directory
         LOG.debug('Removing the fused_outputs dir {} ...'.format(out_dir))
@@ -496,6 +508,8 @@ class FUSION_MATLAB(Computation):
         kwargs['anc_dir'] = anc_dir
         kwargs['env'] = env
         kwargs['out_dir'] = out_dir
+        kwargs['satellite'] = satellite
+        kwargs['granule'] = granule
 
         if satellite=='snpp':
             kwargs['fusion_binary'] = 'run_imagersounderfusion_V.sh'
