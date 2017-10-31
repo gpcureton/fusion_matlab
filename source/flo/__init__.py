@@ -52,6 +52,8 @@ import logging
 import traceback
 from glob import glob
 from subprocess import check_output, check_call, CalledProcessError
+from netCDF4 import Dataset
+from pyhdf.SD import SD, SDC
 
 from flo.computation import Computation
 from flo.builder import WorkflowNotReady
@@ -388,6 +390,7 @@ class FUSION_MATLAB(Computation):
         fused_l1b_file = glob(fused_l1b_file)
         if len(fused_l1b_file) != 0:
             fused_l1b_file = fused_l1b_file[0]
+            LOG.debug('Found final fused output file "{}"'.format(fused_l1b_file))
         else:
             LOG.error('There is no fused file {}, aborting'.format(fused_l1b_file))
             rc_fusion = 1
@@ -399,19 +402,21 @@ class FUSION_MATLAB(Computation):
 
         # Move the final fused file to the work directory
         if satellite=='snpp':
-            fused_l1b_file_new = dt.strftime('VNP02MOD.A%Y%j.%H%M.fsn.CTIME.nc')
+            if 'VL1BM' in l1b_file:
+                fused_l1b_file_new = dt.strftime('VNP02FSN.A%Y%j.%H%M.000.CTIME.nc')
+            elif 'VNP02MOD' in l1b_file:
+                fused_l1b_file_new = 'VNP02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
+            else:
+                pass
         if satellite=='aqua':
-            fused_l1b_file_new = dt.strftime('MYD021KM.A%Y%j.%H%M.fsn.CTIME.hdf')
+            fused_l1b_file_new = 'MYD02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
 
         dt_create = datetime.utcnow()
         fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
 
-        LOG.debug('Found final fused output file "{}", moving to {}...'.format(fused_l1b_file, current_dir))
-        #fused_l1b_file_basename = basename(fused_l1b_file).replace('.bowtie_restored','')
-
         LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, fused_l1b_file_new))
         shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new))
-        
+
         fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_new))[0]
 
         # Remove the fused_outputs directory
@@ -419,6 +424,61 @@ class FUSION_MATLAB(Computation):
         shutil.rmtree(out_dir)
 
         return rc_fusion, fused_l1b_file
+
+    def update_global_attrs(self, netcdf_file, readme_file, **kwargs):
+
+        satellite = kwargs['satellite']
+
+        # Get the git repo information
+        repo_attrs = []
+        try:
+            LOG.debug('Opening {}...'.format(readme_file))
+            readme_obj = open(readme_file, 'ro')
+            line_obj = readme_obj.readlines()
+            for idx, line in enumerate(line_obj):
+                if '.git' in line:
+                    repo_line = line.lstrip(' -*,*').rstrip(' -*,;')
+                    commit_line = line_obj[idx+1].lstrip(' -*,;').rstrip(' -*,;')
+                    git_line = '{}; {}'.format(repo_line, commit_line).replace('\n', '')
+                    LOG.debug('{}'.format(git_line))
+                    repo_attrs.append(git_line)
+        except Exception:
+            LOG.debug(traceback.format_exc())
+
+        readme_obj.close()
+
+        # Update the various file global attributes
+        LOG.debug('Adding attributes to {} ...'.format(netcdf_file))
+        if netcdf_file.split('.')[-1] == 'nc':
+            args = (netcdf_file, "a")
+            kwargs = {'format': "NETCDF4"}
+            file_open = Dataset
+        elif netcdf_file.split('.')[-1] == 'hdf':
+            args = (netcdf_file, SDC.WRITE)
+            kwargs = {}
+            file_open = SD
+
+        try:
+
+            file_obj = file_open(*args, **kwargs)
+
+            # Update the attributes, moving to the end
+            for idx, attr in enumerate(repo_attrs):
+                LOG.debug('{}'.format(attr))
+                setattr(file_obj, 'source_git_repo_{}'.format(idx), attr)
+
+            setattr(file_obj, 'SIPS_version', basename(dirname(readme_file)))
+
+        except Exception:
+            LOG.warning("\tProblem setting attributes in output file {}".format(netcdf_file))
+            LOG.debug(traceback.format_exc())
+
+        if netcdf_file.split('.')[-1] == 'nc':
+            file_obj.close()
+        elif netcdf_file.split('.')[-1] == 'hdf':
+            file_obj.end()
+
+        return
 
     def prepare_env(self, dist_root, inputs, context):
         LOG.debug("Running prepare_env()...")
@@ -436,7 +496,6 @@ class FUSION_MATLAB(Computation):
         env['PATH'] = ':'.join([pjoin(envroot, 'bin'),
                                 pjoin(dist_root, 'bin'),
                                 '/usr/bin:/bin'])
-
 
         LOG.debug("env['PATH'] = \n\t{}".format(env['PATH'].replace(':','\n\t')))
         LOG.debug("env['LD_LIBRARY_PATH'] = \n\t{}".format(env['LD_LIBRARY_PATH'].replace(':','\n\t')))
@@ -545,6 +604,10 @@ class FUSION_MATLAB(Computation):
 
         LOG.debug('convert_matlab_to_netcdf() return value: {}'.format(rc_fusion))
         LOG.info('convert_matlab_to_netcdf() generated {}'.format(fused_l1b_file))
+
+        # Update some global attributes in the output file
+        readme_file =  pjoin(delivery.path, 'README.txt')
+        self.update_global_attrs(basename(fused_l1b_file), readme_file, **kwargs)
 
         # The staging routine assumes that the output file is located in the work directory
         # "tmp******", and that the output path is to be prepended, so return the basename.
