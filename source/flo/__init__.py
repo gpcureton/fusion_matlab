@@ -28,8 +28,8 @@ For Aqua AIRS/MODIS fusion, example inputs are...
 For Suomi-NPP CrIS/VIIRS fusion, example inputs are...
 
     * NASA VIIRS L1B geolocation and radiometric files:
-        VGEOM_snpp_d20150417_t143600_c20170401181622.nc
-        VL1BM_snpp_d20150417_t143600_c20170401181415.nc
+        VNP03MOD.A2015107.1436.001.2017314224025.uwssec.nc
+        VNP02MOD.A2015107.1436.001.2017314223846.uwssec.nc
 
     * NASA CrIS L1B files
         SNDR.SNPP.CRIS.20150417T1436.m06.g147.L1B_NSR.std.v01_00_00.T.161217000158.nc
@@ -161,17 +161,18 @@ class FUSION_MATLAB(Computation):
         self._add_modis_l1b_geo_input(context, task)
         self._add_modis_l1b_m_input(context, task)
         self._add_airs_l1b_input(context, task)
+        #self._add_v2c_inputs(viirstpw, context, task)
 
     def _add_viirs_l1b_geo_input(self, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        vgeom = dawg_catalog.file(satellite, 'VGEOM', granule, version='2.0.2')
+        vgeom = dawg_catalog.file(satellite, 'VNP03MOD', granule, version='2.0.2')
         task.input('geo', vgeom)
 
     def _add_viirs_l1b_m_input(self, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        vl1b = dawg_catalog.file(satellite, 'VL1BM', granule, version='2.0.2')
+        vl1b = dawg_catalog.file(satellite, 'VNP02MOD', granule, version='2.0.2')
         task.input('l1b', vl1b)
 
     def _add_cris_l1b_input(self, context, task):
@@ -186,6 +187,43 @@ class FUSION_MATLAB(Computation):
         for idx, cris_file in enumerate(cris):
             LOG.debug('CrIS granule {}: {} -> {}'.format(idx, cris_file.begin_time, cris_file.end_time))
             task.input('sounder_{}'.format(idx),  cris_file)
+
+    #def _add_cris_viirs_collocation_input(self, context, task):
+        #satellite = context['satellite']
+        #granule = context['granule']
+        #granule_length = timedelta(minutes=6)
+        #cris_interval = TimeInterval(granule, granule+granule_length-timedelta(seconds=1))
+        #cris = dawg_catalog.files(satellite, 'CL1B', cris_interval, version='v1.0rc8')
+        #if cris == []:
+            #raise WorkflowNotReady('Unable to find matching CrIS granules for interval {}'.format(cris_interval))
+
+        #for idx, cris_file in enumerate(cris):
+            #LOG.debug('CrIS granule {}: {} -> {}'.format(idx, cris_file.begin_time, cris_file.end_time))
+            #task.input('sounder_{}'.format(idx),  cris_file)
+
+    #def _add_v2c_inputs(self, product, context, task):
+        #"""
+        #Create and add inputs for c2v transposed inputs overlapping granule
+        #6-min interval.
+        #"""
+        #collo = product.input('collopak')
+        #nucaps = product.input('cspp-nucaps')
+        ## XXX: SDR types are based on other inputs
+        #cris_sdr_type = '{}-{}'.format(nucaps.options['sdr_type'],
+                                       #nucaps.options['cris_version'])
+        ## Here we use the viirs version from our other input
+        #viirs = product.input('viirs_l1')
+        #viirs_sdr_type = 'l1-{}'.format(viirs.version)
+
+        #v2c = ViirsCrisCollocation()
+        #ctx = v2c.find_contexts(l1b_interval(context['granule']),
+                                #cris_sdr_type=cris_sdr_type,
+                                #viirs_sdr_type=viirs_sdr_type,
+                                #version=collo.version)[0]
+        #if ctx['viirs_granule'] != ctx['cris_granule']:
+            #raise WorkflowNotReady('TPW: Granule times must be the same', ctx)
+
+        #task.input('v2c', v2c.dataset('out').product(ctx))
 
     def build_task_snpp(self, context, task):
         '''
@@ -236,7 +274,7 @@ class FUSION_MATLAB(Computation):
 
         vgeom_file = inputs['geo']
 
-        crisviirs = support_software.lookup('collopak', version='0.1.65')
+        crisviirs = support_software.lookup('collopak')
         crisviirs_exe = pjoin(crisviirs.path,'bin/crisviirs')
         for cris_file in cris_files:
             cmd = '{} {} {} > /dev/null'.format(crisviirs_exe, cris_file, vgeom_file)
@@ -244,7 +282,10 @@ class FUSION_MATLAB(Computation):
             LOG.info('cmd = {}'.format(cmd))
             runscript(cmd, requirements=[])
 
-        return glob('colloc.*.nc')
+        collo_files = glob('colloc.*.nc')
+        collo_files.sort()
+
+        return collo_files
 
     def airs_modis_collocation(self, inputs):
 
@@ -257,7 +298,7 @@ class FUSION_MATLAB(Computation):
 
         modis_file = inputs['geo']
 
-        airsmodis = support_software.lookup('collopak', version='0.1.65')
+        airsmodis = support_software.lookup('collopak')
         airsmodis_exe = pjoin(airsmodis.path,'bin/airsmod')
         for airs_file in airs_files:
             cmd = '{} {} {} > /dev/null'.format(airsmodis_exe, airs_file, modis_file)
@@ -265,7 +306,10 @@ class FUSION_MATLAB(Computation):
             LOG.info('cmd = {}'.format(cmd))
             runscript(cmd, requirements=[])
 
-        return glob('colloc.*.nc')
+        collo_files = glob('colloc.*.nc')
+        collo_files.sort()
+
+        return collo_files
 
     def run_fusion_matlab(self, geo_file, l1b_file, sounder_files, collo_files, **kwargs):
         '''
@@ -277,7 +321,9 @@ class FUSION_MATLAB(Computation):
         fusion_binary = kwargs['fusion_binary']
         out_dir = kwargs['out_dir']
         matlab_file_glob = kwargs['matlab_file_glob']
+        matlab_file_dt_filespec = kwargs['matlab_file_dt_filespec']
         env = kwargs['env']
+        granule = kwargs['granule']
 
         rc_fusion = 0
 
@@ -303,6 +349,8 @@ class FUSION_MATLAB(Computation):
             LOG.debug("cmd = \\\n\t{}".format(cmd.replace(' ',' \\\n\t')))
             rc_fusion = 0
             runscript(cmd, requirements=[], env=env)
+            #shutil.copy('/mnt/sdata/geoffc/fusion_matlab/work/test_for_gala/CrIS_VIIRS-VNP02MOD/outputs/tmpeajDcu/fusion_viirs_15107.1754.001.2.mat',current_dir) # DEBUG
+            #shutil.copy('/mnt/sdata/geoffc/fusion_matlab/work/test_for_gala/AIRS_MODIS/fusion_modis_2015107.1755.mat',current_dir) # DEBUG
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
@@ -313,8 +361,9 @@ class FUSION_MATLAB(Computation):
         if len(matlab_file) != 0:
             matlab_file = matlab_file[0]
             LOG.debug('Found Matlab file "{}", moving to {}...'.format(matlab_file, out_dir))
-            shutil.move(matlab_file, out_dir)
-            matlab_file = glob(pjoin(out_dir, matlab_file))[0]
+            new_matlab_name = datetime.strftime(granule, matlab_file_dt_filespec)
+            shutil.move(matlab_file, pjoin(out_dir, new_matlab_name))
+            matlab_file = glob(pjoin(out_dir, new_matlab_name))[0]
         else:
             LOG.error('There are no Matlab files "{}" to convert, aborting'.format(matlab_file_glob))
             rc_fusion = 1
@@ -332,20 +381,11 @@ class FUSION_MATLAB(Computation):
         bin_dir = kwargs['bin_dir']
         anc_dir = kwargs['anc_dir']
         out_dir = kwargs['out_dir']
-        matlab_file_dt_str = kwargs['matlab_file_dt_str']
-        matlab_file_dt_filespec = kwargs['matlab_file_dt_filespec']
         conversion_bin = kwargs['conversion_bin']
         env = kwargs['env']
         satellite = kwargs['satellite']
-        granule = kwargs['granule']
 
         rc_fusion = 0
-
-        dt = datetime.strptime(basename(matlab_file), matlab_file_dt_filespec)
-        dt_string = dt.strftime(matlab_file_dt_str)
-
-        LOG.debug('dt_string = {}'.format(dt_string))
-        LOG.debug('granule = {}'.format(granule))
 
         # Create the output directory
         current_dir = os.getcwd()
@@ -402,22 +442,27 @@ class FUSION_MATLAB(Computation):
 
         # Move the final fused file to the work directory
         if satellite=='snpp':
-            if 'VL1BM' in l1b_file:
-                fused_l1b_file_new = dt.strftime('VNP02FSN.A%Y%j.%H%M.000.CTIME.nc')
-            elif 'VNP02MOD' in l1b_file:
-                fused_l1b_file_new = 'VNP02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
-            else:
-                pass
+            fused_l1b_file_new = 'VNP02FSN.{}.CTIME.nc'.format('.'.join(l1b_file.split('.')[1:4]))
         if satellite=='aqua':
             fused_l1b_file_new = 'MYD02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
 
+        # Create a common creation timestamp for the matlab and HDF4/NetCDF4 files
         dt_create = datetime.utcnow()
+
+        LOG.debug('Current dir is {}'.format(os.getcwd()))
+
+        # Move the HDF4/NetCDF4 file to it's new filename
         fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
-
-        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, fused_l1b_file_new))
+        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new)))
         shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new))
-
         fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_new))[0]
+
+        # Move the matlab file to it's new filename
+        matlab_file_new = basename(matlab_file).replace(
+                '.mat', '{}.mat'.format(dt_create.strftime('.%Y%j%H%M%S')))
+        LOG.debug('Moving "{}" to {}...'.format(matlab_file, pjoin(dirname(current_dir), matlab_file_new)))
+        shutil.move(matlab_file, pjoin(dirname(current_dir), matlab_file_new))
+        matlab_file = glob(pjoin(dirname(current_dir), matlab_file_new))[0]
 
         # Remove the fused_outputs directory
         LOG.debug('Removing the fused_outputs dir {} ...'.format(out_dir))
@@ -572,13 +617,13 @@ class FUSION_MATLAB(Computation):
 
         if satellite=='snpp':
             kwargs['fusion_binary'] = 'run_imagersounderfusion_V.sh'
-            kwargs['matlab_file_glob'] = 'fusion_viirs_*_t*.mat'
+            kwargs['matlab_file_glob'] = 'fusion_viirs_*.mat'
             kwargs['matlab_file_dt_str'] = '%Y%m%d_t%H%M%S'
             kwargs['matlab_file_dt_filespec'] = 'fusion_viirs_{}.mat'.format(kwargs['matlab_file_dt_str'])
             kwargs['conversion_bin'] = pjoin(envroot, 'bin', 'l1b-fusion-viirs-cris')
         elif satellite=='aqua':
             kwargs['fusion_binary'] = 'run_imagersounderfusion_M.sh'
-            kwargs['matlab_file_glob'] = 'fusion_modis_*.*.mat'
+            kwargs['matlab_file_glob'] = 'fusion_modis_*.mat'
             kwargs['matlab_file_dt_str'] = '%Y%j.%H%M'
             kwargs['matlab_file_dt_filespec'] = 'fusion_modis_{}.mat'.format(kwargs['matlab_file_dt_str'])
             kwargs['conversion_bin'] = pjoin(envroot, 'bin', 'l1b-fusion-modis-airs')
