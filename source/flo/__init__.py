@@ -44,13 +44,14 @@ Licensed under GNU GPLv3.
 """
 
 import os
-from os.path import basename, dirname, curdir, abspath, isdir, isfile, exists, join as pjoin
+from os.path import basename, dirname, curdir, abspath, isdir, isfile, exists, splitext, join as pjoin
 import sys
 import string
 import shutil
 import logging
 import traceback
 from glob import glob
+from itertools import chain
 from subprocess import check_output, check_call, CalledProcessError
 from netCDF4 import Dataset
 from pyhdf.SD import SD, SDC
@@ -64,6 +65,7 @@ from glutil.software import delivered_software, support_software, runscript
 from glutil.catalogs import dawg_catalog
 
 from utils import create_dir
+from detect_bad_fusion import SFX, detect
 
 # every module should have a LOG object
 LOG = logging.getLogger(__file__)
@@ -324,6 +326,7 @@ class FUSION_MATLAB(Computation):
         matlab_file_dt_filespec = kwargs['matlab_file_dt_filespec']
         env = kwargs['env']
         granule = kwargs['granule']
+        satellite = kwargs['satellite']
 
         rc_fusion = 0
 
@@ -349,8 +352,6 @@ class FUSION_MATLAB(Computation):
             LOG.debug("cmd = \\\n\t{}".format(cmd.replace(' ',' \\\n\t')))
             rc_fusion = 0
             runscript(cmd, requirements=[], env=env)
-            #shutil.copy('/mnt/sdata/geoffc/fusion_matlab/work/test_for_gala/CrIS_VIIRS-VNP02MOD/outputs/tmpeajDcu/fusion_viirs_15107.1754.001.2.mat',current_dir) # DEBUG
-            #shutil.copy('/mnt/sdata/geoffc/fusion_matlab/work/test_for_gala/AIRS_MODIS/fusion_modis_2015107.1755.mat',current_dir) # DEBUG
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
@@ -451,24 +452,49 @@ class FUSION_MATLAB(Computation):
 
         LOG.debug('Current dir is {}'.format(os.getcwd()))
 
-        # Move the HDF4/NetCDF4 file to it's new filename
+        # Move the HDF4/NetCDF4 file to its new filename
         fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
         LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new)))
         shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new))
         fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_new))[0]
 
-        # Move the matlab file to it's new filename
+        # Move the matlab file to its new filename
         matlab_file_new = basename(matlab_file).replace(
                 '.mat', '{}.mat'.format(dt_create.strftime('.%Y%j%H%M%S')))
-        LOG.debug('Moving "{}" to {}...'.format(matlab_file, pjoin(dirname(current_dir), matlab_file_new)))
-        shutil.move(matlab_file, pjoin(dirname(current_dir), matlab_file_new))
-        matlab_file = glob(pjoin(dirname(current_dir), matlab_file_new))[0]
+        LOG.debug('Moving "{}" to {}...'.format(matlab_file, pjoin(current_dir, matlab_file_new)))
+        shutil.move(matlab_file, pjoin(current_dir, matlab_file_new))
+        matlab_file = glob(pjoin(current_dir, matlab_file_new))[0]
 
         # Remove the fused_outputs directory
         LOG.debug('Removing the fused_outputs dir {} ...'.format(out_dir))
         shutil.rmtree(out_dir)
 
         return rc_fusion, fused_l1b_file
+
+    def output_QC(self, l1b_file, fused_l1b_file, band=None, input_rms=0.2, **kwargs):
+
+        satellite = kwargs['satellite']
+        LOG.debug('satellite = {}'.format(satellite))
+
+        band_default = {'aqua':32, 'snpp':15}
+        if band is None:
+            band = band_default[satellite]
+
+        input_files = [fused_l1b_file] if satellite=='snpp' else [l1b_file, fused_l1b_file]
+
+        generators = list(SFX[splitext(p)[-1].lower()](p, band) for p in input_files)
+        stuff = list(chain(*generators))
+        if len(stuff) != 2:
+            raise AssertionError("requires original + fusion input")
+        passfail, rms = detect(input_rms, *stuff)
+
+        if passfail:
+            LOG.info("Output QC PASS (rms {} < threshold {})".format(rms, input_rms))
+        else:
+            LOG.warn("Output QC FAIL (rms {} > threshold {})".format(rms, input_rms))
+
+        return 0 if passfail else 1
+
 
     def update_global_attrs(self, netcdf_file, readme_file, **kwargs):
 
@@ -653,6 +679,12 @@ class FUSION_MATLAB(Computation):
         # Update some global attributes in the output file
         readme_file =  pjoin(delivery.path, 'README.txt')
         self.update_global_attrs(basename(fused_l1b_file), readme_file, **kwargs)
+
+        # Run a QC check on the output file
+        rc_qc = self.output_QC(l1b, fused_l1b_file, **kwargs)
+        LOG.debug('output_QC() return value: {}'.format(rc_qc))
+        if rc_qc != 0:
+            raise WorkflowNotReady('Output fusion file {} failed RMS error QC check, output aborted.'.format(fused_l1b_file))
 
         # The staging routine assumes that the output file is located in the work directory
         # "tmp******", and that the output path is to be prepended, so return the basename.
