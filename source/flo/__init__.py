@@ -61,14 +61,27 @@ from flo.builder import WorkflowNotReady
 from timeutil import TimeInterval, datetime, timedelta
 from flo.util import symlink_inputs_to_working_dir
 
-from glutil.software import delivered_software, support_software, runscript
-from glutil.catalogs import dawg_catalog
+import sipsprod
+from glutil import (
+    #check_call,
+    dawg_catalog,
+    delivered_software,
+    support_software,
+    runscript,
+    get_viirs_l1_luts,
+    #prepare_env,
+    #nc_gen,
+    nc_compress,
+    reraise_as,
+    set_official_product_metadata,
+    FileNotFound
+)
 
 from utils import create_dir
 from detect_bad_fusion import SFX, detect
 
 # every module should have a LOG object
-LOG = logging.getLogger(__file__)
+LOG = logging.getLogger(__name__)
 
 class FUSION_MATLAB(Computation):
 
@@ -76,7 +89,7 @@ class FUSION_MATLAB(Computation):
 
     outputs = ['fused_l1b']
 
-    def find_contexts(self, time_interval, satellite, delivery_id):
+    def find_contexts(self, time_interval, satellite, version):
         '''
         Here we assume that the granule boundaries fall along 6-minute (snpp) or 5-minute (aqua)
         increments, starting at the top of the hour:
@@ -92,7 +105,7 @@ class FUSION_MATLAB(Computation):
         else:
             return []
 
-        return [{'satellite': satellite, 'version': delivery_id, 'granule': g}
+        return [{'satellite': satellite, 'version': version, 'granule': g}
                     for g in time_interval.contained_series(granule_length)]
 
     def _add_modis_l1b_geo_input(self, context, task):
@@ -122,8 +135,6 @@ class FUSION_MATLAB(Computation):
             raise WorkflowNotReady('Unable to find matching MYD021KM granule for interval {}'.format(myd021km_interval))
         myd021km_file = myd021km[0]
         LOG.debug('MYD021KM granule path: {}'.format(myd021km_file.path))
-        #if not exists(myd021km_file.path):
-            #raise WorkflowNotReady('Nominally valid MYD021KM path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd021km_file.path, granule, myd021km_interval))
 
         task.input('l1b', myd021km_file)
 
@@ -138,8 +149,6 @@ class FUSION_MATLAB(Computation):
             raise WorkflowNotReady('Unable to find matching MYD03 granule for interval {}'.format(myd03_interval))
         myd03_file = myd03[0]
         LOG.debug('MYD03 granule path: {}'.format(myd03_file.path))
-        #if not exists(myd03_file.path):
-            #raise WorkflowNotReady('Nominally valid MYD03 path {} for granule {} or interval {} does not exist, possible DB corruption'.format(myd03_file.path, granule, myd03_interval))
 
         buf = 0 # seconds
         airs_begin = myd03_file.begin_time - timedelta(seconds=buf)
@@ -157,87 +166,70 @@ class FUSION_MATLAB(Computation):
         '''
         Build up a set of inputs for a single context
         '''
+        LOG.debug("Ingesting inputs for M02FSN version {} ...".format(context['version']))
+
+        # Get the product definition for 'V02FSN'
+        #product = sipsprod.lookup_product_recurse('V02FSN', version=context['version'])
 
         LOG.debug("context = {}".format(context))
 
         self._add_modis_l1b_geo_input(context, task)
         self._add_modis_l1b_m_input(context, task)
         self._add_airs_l1b_input(context, task)
-        #self._add_v2c_inputs(viirstpw, context, task)
 
-    def _add_viirs_l1b_geo_input(self, context, task):
+        # Make the product definition available to build_task()
+        #task.option('product', product)
+
+    def _add_viirs_l1b_geo_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        vgeom = dawg_catalog.file(satellite, 'VNP03MOD', granule, version='2.0.2')
+        version = product.input('viirs_l1').version
+        input_name = sipsprod.satellite_esdt('V03MOD', satellite)
+        LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
+        vgeom = dawg_catalog.file(satellite, input_name, granule, version=version)
         task.input('geo', vgeom)
 
-    def _add_viirs_l1b_m_input(self, context, task):
+    def _add_viirs_l1b_m_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        vl1b = dawg_catalog.file(satellite, 'VNP02MOD', granule, version='2.0.2')
+        version = product.input('viirs_l1').version
+        input_name = sipsprod.satellite_esdt('V02MOD', satellite)
+        LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
+        vl1b = dawg_catalog.file(satellite, input_name, granule, version=version)
         task.input('l1b', vl1b)
 
-    def _add_cris_l1b_input(self, context, task):
+    def _add_cris_l1b_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
         granule_length = timedelta(minutes=6)
         cris_interval = TimeInterval(granule, granule+granule_length-timedelta(seconds=1))
-        cris = dawg_catalog.files(satellite, 'CL1B', cris_interval, version='v1.0rc8')
-        if cris == []:
-            raise WorkflowNotReady('Unable to find matching CrIS granules for interval {}'.format(cris_interval))
+        version = product.input('cris_l1').version
+        input_name = 'CL1B'
+        LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
+        cris = dawg_catalog.files(satellite, input_name, cris_interval, version=version)
 
         for idx, cris_file in enumerate(cris):
             LOG.debug('CrIS granule {}: {} -> {}'.format(idx, cris_file.begin_time, cris_file.end_time))
             task.input('sounder_{}'.format(idx),  cris_file)
 
-    #def _add_cris_viirs_collocation_input(self, context, task):
-        #satellite = context['satellite']
-        #granule = context['granule']
-        #granule_length = timedelta(minutes=6)
-        #cris_interval = TimeInterval(granule, granule+granule_length-timedelta(seconds=1))
-        #cris = dawg_catalog.files(satellite, 'CL1B', cris_interval, version='v1.0rc8')
-        #if cris == []:
-            #raise WorkflowNotReady('Unable to find matching CrIS granules for interval {}'.format(cris_interval))
-
-        #for idx, cris_file in enumerate(cris):
-            #LOG.debug('CrIS granule {}: {} -> {}'.format(idx, cris_file.begin_time, cris_file.end_time))
-            #task.input('sounder_{}'.format(idx),  cris_file)
-
-    #def _add_v2c_inputs(self, product, context, task):
-        #"""
-        #Create and add inputs for c2v transposed inputs overlapping granule
-        #6-min interval.
-        #"""
-        #collo = product.input('collopak')
-        #nucaps = product.input('cspp-nucaps')
-        ## XXX: SDR types are based on other inputs
-        #cris_sdr_type = '{}-{}'.format(nucaps.options['sdr_type'],
-                                       #nucaps.options['cris_version'])
-        ## Here we use the viirs version from our other input
-        #viirs = product.input('viirs_l1')
-        #viirs_sdr_type = 'l1-{}'.format(viirs.version)
-
-        #v2c = ViirsCrisCollocation()
-        #ctx = v2c.find_contexts(l1b_interval(context['granule']),
-                                #cris_sdr_type=cris_sdr_type,
-                                #viirs_sdr_type=viirs_sdr_type,
-                                #version=collo.version)[0]
-        #if ctx['viirs_granule'] != ctx['cris_granule']:
-            #raise WorkflowNotReady('TPW: Granule times must be the same', ctx)
-
-        #task.input('v2c', v2c.dataset('out').product(ctx))
-
     def build_task_snpp(self, context, task):
         '''
         Build up a set of inputs for a single context
         '''
+        LOG.debug("Ingesting inputs for V02FSN version {} ...".format(context['version']))
 
-        LOG.debug("context = {}".format(context))
+        # Get the product definition for 'V02FSN'
+        product = sipsprod.lookup_product_recurse('V02FSN', version=context['version'])
 
-        self._add_viirs_l1b_geo_input(context, task)
-        self._add_viirs_l1b_m_input(context, task)
-        self._add_cris_l1b_input(context, task)
+        # Ingest the required inputs, defined in the VNP02 product definition for context['version']
+        self._add_viirs_l1b_geo_input(product, context, task)
+        self._add_viirs_l1b_m_input(product, context, task)
+        self._add_cris_l1b_input(product, context, task)
 
+        # Make the product definition available to build_task()
+        task.option('product', product)
+
+    @reraise_as(WorkflowNotReady, FileNotFound, prefix='V02FSN')
     def build_task(self, context, task):
 
         satellite = context['satellite']
@@ -249,23 +241,31 @@ class FUSION_MATLAB(Computation):
         else:
             raise ValueError('Invalid satellite: {}'.format(satellite))
 
-    def mend_viirs_l1b(self, geo, l1b):
+    def mend_viirs_l1b(self, product, geo, l1b, dummy=False):
 
         out_fn = basename(l1b).replace('.nc', '.bowtie_restored.nc')
         LOG.info('out_fn = {}'.format(out_fn))
         shutil.copy(l1b, out_fn)
 
-        viirsmend = support_software.lookup('viirsmend', version='1.2.12')
+        version = product.input('viirsmend').version
+        viirsmend = support_software.lookup('viirsmend', version=version)
         py_exe = pjoin(viirsmend.path,'bin/python')
         viirsmend_exe = pjoin(viirsmend.path,'bin/viirsl1mend')
-        cmd = '{} {} {} {}'.format(py_exe, viirsmend_exe, out_fn, geo)
 
-        LOG.info('cmd = {}'.format(cmd))
-        runscript(cmd, requirements=[viirsmend])
+        cmd = '{} {} {} {}'.format(py_exe, viirsmend_exe, out_fn, geo)
+        LOG.debug('cmd = {}'.format(cmd))
+
+        dummy_bowtie_rest_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmpqXueRR/VNP02MOD.A2015107.1806.001.2017314223920.uwssec.bowtie_restored.nc'
+
+        if not dummy:
+            runscript(cmd, requirements=[viirsmend])
+        else:
+            LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_bowtie_rest_file, out_fn))
+            shutil.copy(dummy_bowtie_rest_file, out_fn) # DEBUG
 
         return out_fn
 
-    def cris_viirs_collocation(self, inputs):
+    def cris_viirs_collocation(self, product, inputs, dummy=False):
 
         LOG.info('inputs = {}'.format(inputs))
         input_keys = inputs.keys()
@@ -276,20 +276,28 @@ class FUSION_MATLAB(Computation):
 
         vgeom_file = inputs['geo']
 
-        crisviirs = support_software.lookup('collopak')
+        version = product.input('collopak').version
+        crisviirs = support_software.lookup('collopak', version=version)
         crisviirs_exe = pjoin(crisviirs.path,'bin/crisviirs')
-        for cris_file in cris_files:
-            cmd = '{} {} {} > /dev/null'.format(crisviirs_exe, cris_file, vgeom_file)
 
-            LOG.info('cmd = {}'.format(cmd))
-            runscript(cmd, requirements=[])
+        dummy_collo_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmpqXueRR/colloc.cris_snpp.viirs_m_snpp.20150417T180600_180600.nc'
+
+        if not dummy:
+            for cris_file in cris_files:
+                cmd = '{} {} {} > /dev/null'.format(crisviirs_exe, cris_file, vgeom_file)
+
+                LOG.info('cmd = {}'.format(cmd))
+                runscript(cmd, requirements=[])
+        else:
+            LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_collo_file, abspath(curdir)))
+            shutil.copy(dummy_collo_file, './') # DEBUG
 
         collo_files = glob('colloc.*.nc')
         collo_files.sort()
 
         return collo_files
 
-    def airs_modis_collocation(self, inputs):
+    def airs_modis_collocation(self, product, inputs):
 
         LOG.info('inputs = {}'.format(inputs))
         input_keys = inputs.keys()
@@ -300,7 +308,9 @@ class FUSION_MATLAB(Computation):
 
         modis_file = inputs['geo']
 
+        version = product.input('collopak').version
         airsmodis = support_software.lookup('collopak')
+        #airsmodis = support_software.lookup('collopak', version=version)
         airsmodis_exe = pjoin(airsmodis.path,'bin/airsmod')
         for airs_file in airs_files:
             cmd = '{} {} {} > /dev/null'.format(airsmodis_exe, airs_file, modis_file)
@@ -313,7 +323,7 @@ class FUSION_MATLAB(Computation):
 
         return collo_files
 
-    def run_fusion_matlab(self, geo_file, l1b_file, sounder_files, collo_files, **kwargs):
+    def run_fusion_matlab(self, product, geo_file, l1b_file, sounder_files, collo_files, **kwargs):
         '''
         Run the Matlab fusion binary on the input level-1b files to generate the *.mat output file.
         '''
@@ -328,13 +338,25 @@ class FUSION_MATLAB(Computation):
         granule = kwargs['granule']
         satellite = kwargs['satellite']
 
+        dummy = kwargs['dummy']
+        if dummy:
+            if satellite=='snpp':
+                dummy_matlab_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmpqXueRR/fusion_viirs_20150417_t180600.2018016224622.mat'
+            if satellite=='aqua':
+                dummy_matlab_file = '/mnt/sdata/geoffc/fusion_matlab/work/test_for_gala/AIRS_MODIS/fusion_modis_2015107.1755.mat'
+                dummy = False
+
         rc_fusion = 0
+
+        # Get the matlab runtim version that we require
+        matlab_version = '2015b'
+        #matlab_version = product.input('fusion_matlab').options['matlab_version']
 
         #run matlab
         cmd = '{}/{} {} {} {} {} {} {}'.format(
             bin_dir,
             fusion_binary,
-            support_software.lookup('matlab', '2015b').path,
+            support_software.lookup('matlab', matlab_version).path,
             geo_file,
             l1b_file,
             ' '.join(sounder_files),
@@ -351,7 +373,11 @@ class FUSION_MATLAB(Computation):
         try:
             LOG.debug("cmd = \\\n\t{}".format(cmd.replace(' ',' \\\n\t')))
             rc_fusion = 0
-            runscript(cmd, requirements=[], env=env)
+            if not dummy:
+                runscript(cmd, requirements=[], env=env)
+            else:
+                LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_matlab_file, current_dir))
+                shutil.copy(dummy_matlab_file, current_dir) # DEBUG
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
@@ -373,7 +399,7 @@ class FUSION_MATLAB(Computation):
         return rc_fusion, matlab_file
 
 
-    def convert_matlab_to_netcdf(self, matlab_file, l1b_file, **kwargs):
+    def convert_matlab_to_netcdf(self, product, matlab_file, l1b_file, **kwargs):
         '''
         Transcode the Matlab *.mat file into a CF-compliant HDF4 (aqua) or NetCDF4 (snpp) file.
         '''
@@ -385,6 +411,9 @@ class FUSION_MATLAB(Computation):
         conversion_bin = kwargs['conversion_bin']
         env = kwargs['env']
         satellite = kwargs['satellite']
+        granule = kwargs['granule']
+
+        dummy = kwargs['dummy']
 
         rc_fusion = 0
 
@@ -442,18 +471,26 @@ class FUSION_MATLAB(Computation):
         shutil.rmtree(unfused_l1b_dir)
 
         # Move the final fused file to the work directory
-        if satellite=='snpp':
-            fused_l1b_file_new = 'VNP02FSN.{}.CTIME.nc'.format('.'.join(l1b_file.split('.')[1:4]))
-        if satellite=='aqua':
-            fused_l1b_file_new = 'MYD02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
-
-        # Create a common creation timestamp for the matlab and HDF4/NetCDF4 files
         dt_create = datetime.utcnow()
 
+        if satellite=='snpp' or satellite=='jpss1':
+            esdt = sipsprod.satellite_esdt('V02FSN', satellite)
+            product.options['collection'] = int(basename(l1b_file).split('.')[3])
+            #fused_l1b_file_new = 'VNP02FSN.{}.CTIME.nc'.format('.'.join(l1b_file.split('.')[1:4]))
+            fused_l1b_file_new = sipsprod.product_filename(esdt, product.options['collection'],
+                                                           granule, dt_create)
+        if satellite=='aqua':
+            esdt = sipsprod.satellite_esdt('M02FSN', satellite)
+            #fused_l1b_file_new = 'MYD02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
+            product.options['collection'] = int(basename(l1b_file).split('.')[3])
+            fused_l1b_file_new = sipsprod.product_filename(esdt, product.options['collection'],
+                                                           granule, dt_create)
+
+        # Create a common creation timestamp for the matlab and HDF4/NetCDF4 files
         LOG.debug('Current dir is {}'.format(os.getcwd()))
 
         # Move the HDF4/NetCDF4 file to its new filename
-        fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
+        #fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
         LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new)))
         shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new))
         fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_new))[0]
@@ -469,14 +506,17 @@ class FUSION_MATLAB(Computation):
         LOG.debug('Removing the fused_outputs dir {} ...'.format(out_dir))
         shutil.rmtree(out_dir)
 
-        return rc_fusion, fused_l1b_file
+        output_attrs = {'esdt': esdt, 'collection': product.options['collection'],
+                        'created': dt_create}
+
+        return rc_fusion, fused_l1b_file, output_attrs
 
     def output_QC(self, l1b_file, fused_l1b_file, band=None, input_rms=0.2, **kwargs):
 
         satellite = kwargs['satellite']
         LOG.debug('satellite = {}'.format(satellite))
 
-        band_default = {'aqua':32, 'snpp':15}
+        band_default = {'aqua':[31, 32], 'snpp':[15, 16]}
         if band is None:
             band = band_default[satellite]
 
@@ -538,8 +578,6 @@ class FUSION_MATLAB(Computation):
                 LOG.debug('{}'.format(attr))
                 setattr(file_obj, 'source_git_repo_{}'.format(idx), attr)
 
-            setattr(file_obj, 'SIPS_version', basename(dirname(readme_file)))
-
         except Exception:
             LOG.warning("\tProblem setting attributes in output file {}".format(netcdf_file))
             LOG.debug(traceback.format_exc())
@@ -573,6 +611,7 @@ class FUSION_MATLAB(Computation):
 
         return env
 
+    @reraise_as(WorkflowNotReady, FileNotFound, prefix='V02FSN')
     def run_task(self, inputs, context):
 
         LOG.debug("Running run_task()...")
@@ -582,10 +621,12 @@ class FUSION_MATLAB(Computation):
 
         granule = context['granule']
         satellite = context['satellite']
-        delivery_id = context['version']
+        version = context['version']
 
         # Get the location of the binary package
-        delivery = delivered_software.lookup('fusion_matlab', delivery_id=delivery_id)
+        product = context['product']
+        delivery = delivered_software.lookup(
+                'fusion_matlab', delivery_id=product.input('fusion_matlab').version)
         dist_root = pjoin(delivery.path, 'dist')
         envroot = pjoin(dist_root, 'env')
 
@@ -606,13 +647,17 @@ class FUSION_MATLAB(Computation):
             LOG.debug("inputs['{}'] = {}".format(input,inputs[input]))
         LOG.debug("Inputs dir = {}".format(inputs_dir))
 
+        # Are we doing a dummy run?
+        #dummy = True
+        dummy = False
+
         # Run viirsmend on the viirs level-1b, and generate the CrIS/VIIRS collocation
         if satellite == 'snpp':
             geo = inputs['geo']
-            l1b = self.mend_viirs_l1b(inputs['geo'], inputs['l1b'])
+            l1b = self.mend_viirs_l1b(product, inputs['geo'], inputs['l1b'], dummy=dummy)
             sounder_keys = [key for key in inputs.keys() if 'sounder' in key]
             sounder = [inputs[key] for key in sounder_keys]
-            collo = self.cris_viirs_collocation(inputs)
+            collo = self.cris_viirs_collocation(product, inputs, dummy=dummy)
 
         # Generate the AIRS/MODIS collocation
         if satellite == 'aqua':
@@ -640,6 +685,7 @@ class FUSION_MATLAB(Computation):
         kwargs['out_dir'] = out_dir
         kwargs['satellite'] = satellite
         kwargs['granule'] = granule
+        kwargs['dummy'] = dummy
 
         if satellite=='snpp':
             kwargs['fusion_binary'] = 'run_imagersounderfusion_V.sh'
@@ -658,6 +704,7 @@ class FUSION_MATLAB(Computation):
 
         # Run the fusion_matlab package
         rc_fusion, matlab_file = self.run_fusion_matlab(
+                                                   product,
                                                    geo,
                                                    l1b,
                                                    sounder,
@@ -669,26 +716,47 @@ class FUSION_MATLAB(Computation):
         LOG.info('run_fusion_matlab() generated {}'.format(matlab_file))
 
         # Now that we've computed the Matlab file, convert to a NetCDF file...
-        rc_fusion, fused_l1b_file = self.convert_matlab_to_netcdf(matlab_file,
-                                                                  l1b,
-                                                                  **kwargs)
+        rc_fusion, fused_l1b_file, output_attrs = self.convert_matlab_to_netcdf(
+                                                                               product,
+                                                                               matlab_file,
+                                                                               l1b,
+                                                                               **kwargs)
 
         LOG.debug('convert_matlab_to_netcdf() return value: {}'.format(rc_fusion))
         LOG.info('convert_matlab_to_netcdf() generated {}'.format(fused_l1b_file))
 
         # Update some global attributes in the output file
-        readme_file =  pjoin(delivery.path, 'README.txt')
-        self.update_global_attrs(basename(fused_l1b_file), readme_file, **kwargs)
+        #readme_file =  pjoin(delivery.path, 'README.txt')
+        #self.update_global_attrs(basename(fused_l1b_file), readme_file, **kwargs)
 
         # Run a QC check on the output file
-        rc_qc = self.output_QC(l1b, fused_l1b_file, **kwargs)
-        LOG.debug('output_QC() return value: {}'.format(rc_qc))
-        if rc_qc != 0:
-            raise WorkflowNotReady('Output fusion file {} failed RMS error QC check, output aborted.'.format(fused_l1b_file))
+        #rc_qc = self.output_QC(l1b, fused_l1b_file, **kwargs)
+        #LOG.debug('output_QC() return value: {}'.format(rc_qc))
+        #if rc_qc != 0:
+            #raise RuntimeError('Output fusion file {} failed RMS error QC check, output aborted.'.format(fused_l1b_file))
 
         # The staging routine assumes that the output file is located in the work directory
         # "tmp******", and that the output path is to be prepended, so return the basename.
 
         out_fn = basename(fused_l1b_file)
 
-        return {'fused_l1b': out_fn}
+        # Set metadata to be put in the output file.
+        l1_version = product.input('viirs_l1').version
+        input_fns, lut_version, lut_created = get_viirs_l1_luts(l1b, geo_fn=geo)
+        ancillary_fns = []
+
+        set_official_product_metadata(
+            output_attrs['esdt'], product.version, output_attrs['collection'],
+            product.input('fusion_matlab').version, context['satellite'],
+            fused_l1b_file, geo,
+            input_fns, ancillary_fns,
+            l1_version, lut_version, lut_created,
+            product.inputstr(), output_attrs['created'])
+
+        return {'fused_l1b': nc_compress(out_fn)}
+        #return {
+            #'fused_l1b': {
+                #'file': out_fn,
+                #'extra_attrs': extra_attrs,
+            #},
+        #}

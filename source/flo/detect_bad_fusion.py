@@ -5,6 +5,7 @@
 import os
 import sys
 import numpy as np
+from pyhdf.SD import SD, SDC
 import netCDF4 as nc4
 #from scipy.io import loadmat
 import logging
@@ -20,7 +21,7 @@ def detect(threshold, tru, tst):
     """Compute RMS error and return pass/fail boolean"""
     yisq = (tst.ravel() - tru.ravel()) ** 2.0
     rms = np.sqrt(np.sum(yisq) / float(len(yisq)))
-    LOG.info("RMS error is {} (threshold {})".format(rms, threshold))
+    LOG.debug("RMS error is {} (threshold {})".format(rms, threshold))
     return bool(rms <= threshold), rms
 
 
@@ -33,11 +34,31 @@ def detect(threshold, tru, tst):
     #yield rad
 
 
-def modis_band(filename, band_number=DEFAULT_BAND):
-    """Yield M or F from a single MODIS or MODIS-AIRS fusion file"""
+def modis_band_nc(filename, band_number=DEFAULT_BAND):
+    """Yield M or F from a single MODIS or MODIS-AIRS fusion file, NetCDF4"""
     LOG.info("reading band {} from {} MODIS HDF".format(band_number, filename))
     nc = nc4.Dataset(filename)
     em = nc.variables['EV_1KM_Emissive']
+    bn,sc,of = dict(((b,i) for (i,b) in enumerate(map(int, em.band_names.split(','))))), em.radiance_scales, em.radiance_offsets
+    band = lambda v, b: sc[bn[b]] * (v[bn[b]] - of[bn[b]])
+    yield band(em, band_number)
+
+def modis_band(filename, band_number=DEFAULT_BAND):
+    """Yield M or F from a single MODIS or MODIS-AIRS fusion file, using HDF4"""
+    LOG.info("reading band {} from {} MODIS HDF".format(band_number, filename))
+    print(filename)
+    file_obj = SD(str(filename))
+    em = file_obj.select('EV_1KM_Emissive')
+    bn,sc,of = dict(((b,i) for (i,b) in enumerate(map(int, em.band_names.split(','))))), em.radiance_scales, em.radiance_offsets
+    band = lambda v, b: sc[bn[b]] * (v[bn[b]] - of[bn[b]])
+    yield band(em, band_number)
+
+def modis_band_new(filename, band_number=DEFAULT_BAND):
+    """Yield M or F from a single MODIS or MODIS-AIRS fusion file, using HDF4"""
+    LOG.info("reading band {} from {} MODIS HDF".format(band_number, filename))
+    print(filename)
+    file_obj = SD(str(filename))
+    em = file_obj.select('EV_1KM_Emissive')
     bn,sc,of = dict(((b,i) for (i,b) in enumerate(map(int, em.band_names.split(','))))), em.radiance_scales, em.radiance_offsets
     band = lambda v, b: sc[bn[b]] * (v[bn[b]] - of[bn[b]])
     yield band(em, band_number)
@@ -53,6 +74,14 @@ def viirs_band(filename, band_number=DEFAULT_BAND):
     f = ncob['Fusion%02d' % band_number][:]
     yield f
 
+def viirs_band_new(filename, band_number=DEFAULT_BAND):
+    """Yield both Mband and Fband from a single file"""
+    LOG.info("reading band {} (M and Fusion) from {} VIIRS NetCDF".format(band_number, filename))
+    nc = nc4.Dataset(filename)
+    ncob = nc['observation_data']
+    m = ncob['M%02d' % band_number][:]
+    f = ncob['Fusion%02d' % band_number][:]
+    yield {'M{}'.format(band_number):[m,f]}
 
 def _debug(type_, value, tb):
     """enable with sys.excepthook = debug"""
@@ -67,6 +96,7 @@ def _debug(type_, value, tb):
 
 #SFX = {'.mat': mat_band, '.hdf': modis_band, '.nc': viirs_band}
 SFX = {'.hdf': modis_band, '.nc': viirs_band}
+SFX_new = {'.hdf': modis_band, '.nc': viirs_band_new}
 
 def file_QC(input_rms, band, input_files):
     generators = list(SFX[os.path.splitext(p)[-1].lower()](p, band) for p in input_files)

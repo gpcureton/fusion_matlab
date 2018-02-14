@@ -11,7 +11,7 @@ from flo.sw.fusion_matlab import FUSION_MATLAB
 from flo.sw.fusion_matlab.utils import setup_logging
 
 # every module should have a LOG object
-LOG = logging.getLogger(__file__)
+LOG = logging.getLogger(__name__)
 
 setup_logging(2)
 
@@ -20,6 +20,7 @@ comp = FUSION_MATLAB()
 satellite = 'aqua'
 #satellite = 'snpp'
 
+version = '1.0dev0'
 delivery_id = '20170920-1'
 
 # Specify the intervals

@@ -24,7 +24,7 @@ import traceback
 import logging
 
 # every module should have a LOG object
-LOG = logging.getLogger(__file__)
+LOG = logging.getLogger(__name__)
 
 def setup_logging(verbosity):
     LOG.debug("Verbosity is {}".format(verbosity))
