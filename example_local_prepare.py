@@ -23,8 +23,8 @@ comp = FUSION_MATLAB()
 
 satellite = 'snpp'
 #satellite = 'aqua'
-delivery_id = '20170920-1'
-version = '1.0dev1'
+delivery_id = '20180225-1'
+version = '1.0dev2'
 
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):

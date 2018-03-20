@@ -28,14 +28,14 @@ For Aqua AIRS/MODIS fusion, example inputs are...
 For Suomi-NPP CrIS/VIIRS fusion, example inputs are...
 
     * NASA VIIRS L1B geolocation and radiometric files:
-        VNP03MOD.A2015107.1436.001.2017314224025.uwssec.nc
-        VNP02MOD.A2015107.1436.001.2017314223846.uwssec.nc
+        VNP03MOD.A2018033.1836.001.2018033235737.uwssec.nc
+        VNP02MOD.A2018033.1836.001.2018033235822.uwssec.nc
 
     * NASA CrIS L1B files
-        SNDR.SNPP.CRIS.20150417T1436.m06.g147.L1B_NSR.std.v01_00_00.T.161217000158.nc
+        SNDR.SNPP.CRIS.20180202T1836.m06.g187.L1B.std.v2_0_15.T.180203004403.nc
 
     * CrIS/VIIRS collocation files
-        colloc.cris_20150417T1436.viirs_20150417T1436.nc
+        colloc.cris_snpp.viirs_m_snpp.20180202T183600_183600.nc
 
 
 
@@ -72,6 +72,7 @@ from glutil import (
     #prepare_env,
     #nc_gen,
     nc_compress,
+    hdf_compress,
     reraise_as,
     set_official_product_metadata,
     FileNotFound
@@ -169,7 +170,7 @@ class FUSION_MATLAB(Computation):
         LOG.debug("Ingesting inputs for M02FSN version {} ...".format(context['version']))
 
         # Get the product definition for 'V02FSN'
-        #product = sipsprod.lookup_product_recurse('V02FSN', version=context['version'])
+        product = sipsprod.lookup_product_recurse('V02FSN', version=context['version'])
 
         LOG.debug("context = {}".format(context))
 
@@ -178,7 +179,7 @@ class FUSION_MATLAB(Computation):
         self._add_airs_l1b_input(context, task)
 
         # Make the product definition available to build_task()
-        #task.option('product', product)
+        task.option('product', product)
 
     def _add_viirs_l1b_geo_input(self, product, context, task):
         satellite = context['satellite']
@@ -207,6 +208,9 @@ class FUSION_MATLAB(Computation):
         input_name = 'CL1B'
         LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
         cris = dawg_catalog.files(satellite, input_name, cris_interval, version=version)
+        if cris == []:
+            raise WorkflowNotReady('FUSION_MATLAB: Missing {} inputs for version {} and interval {}'.format(
+                input_name, version, cris_interval))
 
         for idx, cris_file in enumerate(cris):
             LOG.debug('CrIS granule {}: {} -> {}'.format(idx, cris_file.begin_time, cris_file.end_time))
@@ -255,13 +259,13 @@ class FUSION_MATLAB(Computation):
         cmd = '{} {} {} {}'.format(py_exe, viirsmend_exe, out_fn, geo)
         LOG.debug('cmd = {}'.format(cmd))
 
-        dummy_bowtie_rest_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmpqXueRR/VNP02MOD.A2015107.1806.001.2017314223920.uwssec.bowtie_restored.nc'
+        dummy_bowtie_rest_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmp5PwThb/VNP02MOD.A2018033.1836.001.2018033235822.uwssec.bowtie_restored.nc'
 
         if not dummy:
             runscript(cmd, requirements=[viirsmend])
         else:
             LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_bowtie_rest_file, out_fn))
-            shutil.copy(dummy_bowtie_rest_file, out_fn) # DEBUG
+            shutil.copy(dummy_bowtie_rest_file, out_fn)
 
         return out_fn
 
@@ -280,7 +284,7 @@ class FUSION_MATLAB(Computation):
         crisviirs = support_software.lookup('collopak', version=version)
         crisviirs_exe = pjoin(crisviirs.path,'bin/crisviirs')
 
-        dummy_collo_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmpqXueRR/colloc.cris_snpp.viirs_m_snpp.20150417T180600_180600.nc'
+        dummy_collo_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmp5PwThb/colloc.cris_snpp.viirs_m_snpp.20180202T183600_183600.nc'
 
         if not dummy:
             for cris_file in cris_files:
@@ -290,14 +294,14 @@ class FUSION_MATLAB(Computation):
                 runscript(cmd, requirements=[])
         else:
             LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_collo_file, abspath(curdir)))
-            shutil.copy(dummy_collo_file, './') # DEBUG
+            shutil.copy(dummy_collo_file, './')
 
         collo_files = glob('colloc.*.nc')
         collo_files.sort()
 
         return collo_files
 
-    def airs_modis_collocation(self, product, inputs):
+    def airs_modis_collocation(self, product, inputs, dummy=False):
 
         LOG.info('inputs = {}'.format(inputs))
         input_keys = inputs.keys()
@@ -309,14 +313,21 @@ class FUSION_MATLAB(Computation):
         modis_file = inputs['geo']
 
         version = product.input('collopak').version
-        airsmodis = support_software.lookup('collopak')
-        #airsmodis = support_software.lookup('collopak', version=version)
+        airsmodis = support_software.lookup('collopak', version=version)
         airsmodis_exe = pjoin(airsmodis.path,'bin/airsmod')
-        for airs_file in airs_files:
-            cmd = '{} {} {} > /dev/null'.format(airsmodis_exe, airs_file, modis_file)
 
-            LOG.info('cmd = {}'.format(cmd))
-            runscript(cmd, requirements=[])
+        dummy_collo_files = glob('/mnt/sdata/geoffc/fusion_matlab/work/aqua_temp_outputs/outputs/tmpMUoHF3/colloc.airs_aqua.modis_aqua.*.nc')
+
+        if not dummy:
+            for airs_file in airs_files:
+                cmd = '{} {} {} > /dev/null'.format(airsmodis_exe, airs_file, modis_file)
+
+                LOG.info('cmd = {}'.format(cmd))
+                runscript(cmd, requirements=[])
+        else:
+            LOG.debug('dummy cmd = "cp {} {}"'.format(' '.join(dummy_collo_files), abspath(curdir)))
+            for dummy_collo_file in dummy_collo_files:
+                shutil.copy(dummy_collo_file, './')
 
         collo_files = glob('colloc.*.nc')
         collo_files.sort()
@@ -329,11 +340,10 @@ class FUSION_MATLAB(Computation):
         '''
 
         bin_dir = kwargs['bin_dir']
-        anc_dir = kwargs['anc_dir']
+        anc_paths = kwargs['anc_paths']
         fusion_binary = kwargs['fusion_binary']
-        out_dir = kwargs['out_dir']
+        fused_output_dir = kwargs['fused_output_dir']
         matlab_file_glob = kwargs['matlab_file_glob']
-        matlab_file_dt_filespec = kwargs['matlab_file_dt_filespec']
         env = kwargs['env']
         granule = kwargs['granule']
         satellite = kwargs['satellite']
@@ -341,10 +351,9 @@ class FUSION_MATLAB(Computation):
         dummy = kwargs['dummy']
         if dummy:
             if satellite=='snpp':
-                dummy_matlab_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmpqXueRR/fusion_viirs_20150417_t180600.2018016224622.mat'
+                dummy_matlab_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmp5PwThb/fusion_output.mat'
             if satellite=='aqua':
-                dummy_matlab_file = '/mnt/sdata/geoffc/fusion_matlab/work/test_for_gala/AIRS_MODIS/fusion_modis_2015107.1755.mat'
-                dummy = False
+                dummy_matlab_file = '/mnt/sdata/geoffc/fusion_matlab/work/aqua_temp_outputs/outputs/tmpMUoHF3/fusion_output.mat'
 
         rc_fusion = 0
 
@@ -361,13 +370,13 @@ class FUSION_MATLAB(Computation):
             l1b_file,
             ' '.join(sounder_files),
             ' '.join(collo_files),
-            anc_dir
+            ' '.join(anc_paths)
             )
 
-        # Create the output directory
-        current_dir = os.getcwd()
-        LOG.debug('The current directory is {}'.format(current_dir))
-        create_dir(out_dir)
+        # Create the fused outputs directory in the temp work dir (which should be the current dir)
+        tmp_work_dir = os.getcwd()
+        LOG.debug('The current directory is {}'.format(tmp_work_dir))
+        create_dir(fused_output_dir)
 
         # Run the Matlab Fusion code
         try:
@@ -376,21 +385,23 @@ class FUSION_MATLAB(Computation):
             if not dummy:
                 runscript(cmd, requirements=[], env=env)
             else:
-                LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_matlab_file, current_dir))
-                shutil.copy(dummy_matlab_file, current_dir) # DEBUG
+                LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_matlab_file, tmp_work_dir))
+                shutil.copy(dummy_matlab_file, tmp_work_dir) # DEBUG
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
             return rc_fusion, []
 
-        # Move matlab file to the output directory
+        # Move matlab file to the fused outputs directory
         matlab_file = glob(matlab_file_glob)
         if len(matlab_file) != 0:
             matlab_file = matlab_file[0]
-            LOG.debug('Found Matlab file "{}", moving to {}...'.format(matlab_file, out_dir))
-            new_matlab_name = datetime.strftime(granule, matlab_file_dt_filespec)
-            shutil.move(matlab_file, pjoin(out_dir, new_matlab_name))
-            matlab_file = glob(pjoin(out_dir, new_matlab_name))[0]
+            LOG.debug('Found Matlab file "{}", moving to {}...'.format(matlab_file, fused_output_dir))
+            if exists(pjoin(fused_output_dir, matlab_file)):
+                LOG.info('{} exists, removing...'.format(pjoin(fused_output_dir, matlab_file)))
+                os.remove(pjoin(fused_output_dir, matlab_file))
+            shutil.move(matlab_file, fused_output_dir)
+            matlab_file = glob(pjoin(fused_output_dir, matlab_file))[0]
         else:
             LOG.error('There are no Matlab files "{}" to convert, aborting'.format(matlab_file_glob))
             rc_fusion = 1
@@ -406,8 +417,7 @@ class FUSION_MATLAB(Computation):
 
         py_interp = kwargs['py_interp']
         bin_dir = kwargs['bin_dir']
-        anc_dir = kwargs['anc_dir']
-        out_dir = kwargs['out_dir']
+        fused_output_dir = kwargs['fused_output_dir']
         conversion_bin = kwargs['conversion_bin']
         env = kwargs['env']
         satellite = kwargs['satellite']
@@ -415,13 +425,22 @@ class FUSION_MATLAB(Computation):
 
         dummy = kwargs['dummy']
 
+        if dummy:
+            if satellite=='snpp':
+                dummy_fusion_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmp5PwThb/VNP02FSN.A2018033.1836.001.2018058173216.nc'
+            if satellite=='aqua':
+                dummy_fusion_file = '/mnt/sdata/geoffc/fusion_matlab/work/aqua_temp_outputs/outputs/tmpMUoHF3/MYD02FSN.A2015107.1755.006.2018058170733.hdf'
+
         rc_fusion = 0
+        dt_create = datetime.utcnow()
 
         # Create the output directory
-        current_dir = os.getcwd()
+        tmp_work_dir = os.getcwd()
+        LOG.debug('tmp_work_dir (CWD): "{}"'.format(tmp_work_dir))
+        LOG.debug('fused_output_dir: "{}"'.format(fused_output_dir))
 
         # Copy the un-fused level-1b file to the work directory as a template...
-        unfused_l1b_file = pjoin(out_dir, 'unfused', basename(l1b_file))
+        unfused_l1b_file = pjoin(tmp_work_dir, 'unfused', basename(l1b_file))
         unfused_l1b_dir = dirname(unfused_l1b_file)
         create_dir(unfused_l1b_dir)
 
@@ -433,30 +452,36 @@ class FUSION_MATLAB(Computation):
         shutil.copy(l1b_file, unfused_l1b_file)
 
         # Removing the fused file if it exists
-        fused_l1b_file = pjoin(out_dir, basename(unfused_l1b_file))
+        fused_l1b_file = pjoin(fused_output_dir, basename(unfused_l1b_file))
+        LOG.debug('Checking for existing fused output file "{}"'.format(fused_l1b_file))
         if exists(fused_l1b_file):
             LOG.debug('{} exists, removing...'.format(fused_l1b_file))
             os.remove(fused_l1b_file)
 
+        # Convert the Matlab file to the desired format...
         cmd = '{} {}  {} {} {}'.format(
                 py_interp,
                 conversion_bin,
                 unfused_l1b_file,
                 matlab_file,
-                out_dir
+                fused_output_dir
                 )
-
-        # Convert the Matlab file to the desired format...
         try:
             LOG.debug("cmd = \\\n\t{}".format(cmd.replace(' ',' \\\n\t')))
             rc_fusion = 0
-            runscript(cmd, requirements=[], env=env)
+            if not dummy:
+                runscript(cmd, requirements=[], env=env)
+            else:
+                LOG.debug('dummy cmd = "cp {} {}"'.format(dummy_fusion_file,
+                                                          pjoin(fused_output_dir, basename(l1b_file))))
+                shutil.copy(dummy_fusion_file, pjoin(fused_output_dir, basename(l1b_file))) # DEBUG
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("CF converter {} returned a value of {}".format(conversion_bin, rc_fusion))
             return rc_fusion, []
 
         # Determine success...
+        LOG.debug('Looking for fused output file "{}"'.format(fused_l1b_file))
         fused_l1b_file = glob(fused_l1b_file)
         if len(fused_l1b_file) != 0:
             fused_l1b_file = fused_l1b_file[0]
@@ -467,44 +492,40 @@ class FUSION_MATLAB(Computation):
             return rc_fusion, []
 
         # Remove the unfused dir...
-        LOG.debug('Removing the unfused level-1b dir {} ...'.format(unfused_l1b_dir))
-        shutil.rmtree(unfused_l1b_dir)
+        #LOG.debug('Removing the unfused level-1b dir {} ...'.format(unfused_l1b_dir))
+        #shutil.rmtree(unfused_l1b_dir)
 
-        # Move the final fused file to the work directory
-        dt_create = datetime.utcnow()
-
+        # Determine the name of the output fused file
         if satellite=='snpp' or satellite=='jpss1':
             esdt = sipsprod.satellite_esdt('V02FSN', satellite)
             product.options['collection'] = int(basename(l1b_file).split('.')[3])
-            #fused_l1b_file_new = 'VNP02FSN.{}.CTIME.nc'.format('.'.join(l1b_file.split('.')[1:4]))
             fused_l1b_file_new = sipsprod.product_filename(esdt, product.options['collection'],
-                                                           granule, dt_create)
+                                                  granule, dt_create)
         if satellite=='aqua':
             esdt = sipsprod.satellite_esdt('M02FSN', satellite)
-            #fused_l1b_file_new = 'MYD02FSN.{}.CTIME.hdf'.format('.'.join(l1b_file.split('.')[1:4]))
             product.options['collection'] = int(basename(l1b_file).split('.')[3])
             fused_l1b_file_new = sipsprod.product_filename(esdt, product.options['collection'],
-                                                           granule, dt_create)
-
-        # Create a common creation timestamp for the matlab and HDF4/NetCDF4 files
-        LOG.debug('Current dir is {}'.format(os.getcwd()))
+                                                  granule, dt_create)
+            fused_l1b_file_new = fused_l1b_file_new.replace('.nc', '.hdf')
 
         # Move the HDF4/NetCDF4 file to its new filename
-        #fused_l1b_file_new = fused_l1b_file_new.replace('CTIME', dt_create.strftime('%Y%j%H%M%S'))
-        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new)))
-        shutil.move(fused_l1b_file, pjoin(current_dir, fused_l1b_file_new))
-        fused_l1b_file = glob(pjoin(current_dir, fused_l1b_file_new))[0]
+        LOG.debug('Moving "{}" to "{}" ...'.format(fused_l1b_file, pjoin(tmp_work_dir, fused_l1b_file_new)))
+        shutil.move(fused_l1b_file, pjoin(tmp_work_dir, fused_l1b_file_new))
+        fused_l1b_file = glob(pjoin(tmp_work_dir, fused_l1b_file_new))[0]
 
         # Move the matlab file to its new filename
-        matlab_file_new = basename(matlab_file).replace(
-                '.mat', '{}.mat'.format(dt_create.strftime('.%Y%j%H%M%S')))
-        LOG.debug('Moving "{}" to {}...'.format(matlab_file, pjoin(current_dir, matlab_file_new)))
-        shutil.move(matlab_file, pjoin(current_dir, matlab_file_new))
-        matlab_file = glob(pjoin(current_dir, matlab_file_new))[0]
+        if satellite=='snpp' or satellite=='jpss1':
+            matlab_file_new = basename(fused_l1b_file_new).replace('.nc','.mat')
+        if satellite=='aqua':
+            matlab_file_new = basename(fused_l1b_file_new).replace('.hdf','.mat')
+
+        LOG.debug('Moving "{}" to {}...'.format(matlab_file, pjoin(fused_output_dir, matlab_file_new)))
+        shutil.move(matlab_file, pjoin(fused_output_dir, matlab_file_new))
+        matlab_file = glob(pjoin(fused_output_dir, matlab_file_new))[0]
 
         # Remove the fused_outputs directory
-        LOG.debug('Removing the fused_outputs dir {} ...'.format(out_dir))
-        shutil.rmtree(out_dir)
+        #LOG.debug('Removing the fused_outputs dir {} ...'.format(fused_output_dir))
+        #shutil.rmtree(fused_output_dir)
 
         output_attrs = {'esdt': esdt, 'collection': product.options['collection'],
                         'created': dt_create}
@@ -641,7 +662,7 @@ class FUSION_MATLAB(Computation):
         work_dir = abspath(curdir)
         LOG.debug("working dir = {}".format(work_dir))
 
-        # What are out inputs?
+        # What are our inputs?
         for input in inputs.keys():
             inputs_dir = dirname(inputs[input])
             LOG.debug("inputs['{}'] = {}".format(input,inputs[input]))
@@ -665,7 +686,7 @@ class FUSION_MATLAB(Computation):
             l1b = inputs['l1b']
             sounder_keys = [key for key in inputs.keys() if 'sounder' in key]
             sounder = [inputs[key] for key in sounder_keys]
-            collo = self.airs_modis_collocation(inputs)
+            collo = self.airs_modis_collocation(product, inputs, dummy=dummy)
 
         LOG.info('geo = {}'.format(geo))
         LOG.info('l1b = {}'.format(l1b))
@@ -674,30 +695,30 @@ class FUSION_MATLAB(Computation):
 
         bin_dir = pjoin(dist_root, 'bin')
         anc_dir = pjoin(dist_root, 'luts')
-        out_dir = pjoin(work_dir, 'fused_outputs')
+        fused_output_dir = pjoin(work_dir, 'fused_outputs')
 
         # Setup the require keyword arguments for the fusion_matlab package
         kwargs = {}
         kwargs['py_interp'] = py_interp
         kwargs['bin_dir'] = bin_dir
-        kwargs['anc_dir'] = anc_dir
         kwargs['env'] = env
-        kwargs['out_dir'] = out_dir
+        kwargs['fused_output_dir'] = fused_output_dir
         kwargs['satellite'] = satellite
         kwargs['granule'] = granule
         kwargs['dummy'] = dummy
 
         if satellite=='snpp':
+            kwargs['anc_paths'] = [pjoin(anc_dir, 'modis_aqua.srf.nc'),
+                                   pjoin(anc_dir, 'NG_VIIRS_NPP_RSR_filtered_Oct2011_BA/')]
             kwargs['fusion_binary'] = 'run_imagersounderfusion_V.sh'
-            kwargs['matlab_file_glob'] = 'fusion_viirs_*.mat'
-            kwargs['matlab_file_dt_str'] = '%Y%m%d_t%H%M%S'
-            kwargs['matlab_file_dt_filespec'] = 'fusion_viirs_{}.mat'.format(kwargs['matlab_file_dt_str'])
+            kwargs['matlab_file_glob'] = 'fusion_output.mat'
             kwargs['conversion_bin'] = pjoin(envroot, 'bin', 'l1b-fusion-viirs-cris')
         elif satellite=='aqua':
+            kwargs['anc_paths'] = [pjoin(anc_dir, 'L2.chan_prop.2005.03.01.v9.5.1.txt'),
+                                   pjoin(anc_dir, 'modis_aqua.srf.nc'),
+                                   pjoin(anc_dir, 'modis_conv_error_2005.mat')]
             kwargs['fusion_binary'] = 'run_imagersounderfusion_M.sh'
-            kwargs['matlab_file_glob'] = 'fusion_modis_*.mat'
-            kwargs['matlab_file_dt_str'] = '%Y%j.%H%M'
-            kwargs['matlab_file_dt_filespec'] = 'fusion_modis_{}.mat'.format(kwargs['matlab_file_dt_str'])
+            kwargs['matlab_file_glob'] = 'fusion_output.mat'
             kwargs['conversion_bin'] = pjoin(envroot, 'bin', 'l1b-fusion-modis-airs')
         else:
             return {}
@@ -741,19 +762,34 @@ class FUSION_MATLAB(Computation):
         out_fn = basename(fused_l1b_file)
 
         # Set metadata to be put in the output file.
-        l1_version = product.input('viirs_l1').version
-        input_fns, lut_version, lut_created = get_viirs_l1_luts(l1b, geo_fn=geo)
-        ancillary_fns = []
+        if satellite == 'snpp':
+            l1_version = product.input('viirs_l1').version
+            input_fns, lut_version, lut_created = get_viirs_l1_luts(l1b, geo_fn=geo)
+            ancillary_fns = []
+            out_compress = nc_compress
 
-        set_official_product_metadata(
-            output_attrs['esdt'], product.version, output_attrs['collection'],
-            product.input('fusion_matlab').version, context['satellite'],
-            fused_l1b_file, geo,
-            input_fns, ancillary_fns,
-            l1_version, lut_version, lut_created,
-            product.inputstr(), output_attrs['created'])
+            set_official_product_metadata(
+                output_attrs['esdt'], product.version, output_attrs['collection'],
+                product.input('fusion_matlab').version, context['satellite'],
+                fused_l1b_file, geo,
+                input_fns, ancillary_fns,
+                l1_version, lut_version, lut_created,
+                product.inputstr(), output_attrs['created'])
 
-        return {'fused_l1b': nc_compress(out_fn)}
+        if satellite == 'aqua':
+            out_compress = hdf_compress
+            #l1_version = 'ingest'
+            #input_fns = [l1b, geo]
+            #lut_version = ''
+            #lut_created = granule
+            #ancillary_fns = []
+
+
+        LOG.debug('We are in {}'.format(os.getcwd()))
+        LOG.debug('Compressing {}'.format(out_fn))
+        return {'fused_l1b': out_compress(out_fn)}
+        #return {'fused_l1b': out_fn}
+
         #return {
             #'fused_l1b': {
                 #'file': out_fn,
