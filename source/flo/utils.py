@@ -14,11 +14,16 @@ Licensed under GNU GPLv3.
 import os
 import sys
 import string
-from copy import copy
-import shutil
 import traceback
 import logging
+import time
+from glob import glob
+from copy import copy
+import shutil
+from os.path import basename, dirname, abspath, isdir, isfile, exists, join as pjoin
+import fileinput
 
+from datetime import datetime
 
 LOG = logging.getLogger(__name__)
 
@@ -44,6 +49,16 @@ def setup_logging(verbosity):
         format=console_logFormat,
         datefmt=dateFormat)
 
+def _replaceAll(intputfile, searchExp, replaceExp):
+    '''
+    Replace all instances of 'searchExp' with 'replaceExp' in 'intputfile'
+    '''
+    for line in fileinput.input(intputfile, inplace=1):
+        if searchExp in line:
+            line = line.replace(searchExp, replaceExp)
+        sys.stdout.write(line)
+    fileinput.close()
+
 def cleanup(work_dir, objs_to_remove):
     """
     cleanup work directiory
@@ -51,10 +66,10 @@ def cleanup(work_dir, objs_to_remove):
     """
     for file_obj in objs_to_remove:
         try:
-            if os.path.isdir(file_obj):
+            if isdir(file_obj):
                 LOG.debug('Removing directory: {}'.format(file_obj))
                 shutil.rmtree(file_obj)
-            elif os.path.isfile(file_obj):
+            elif isfile(file_obj):
                 LOG.debug('Removing file: {}'.format(file_obj))
                 os.unlink(file_obj)
         except Exception:
@@ -66,9 +81,9 @@ def link_files(dest_path, files):
     '''
     files_linked = 0
     for src_file in files:
-        src = os.path.basename(src_file)
-        dest_file = os.path.join(dest_path, src)
-        if not os.path.exists(dest_file):
+        src = basename(src_file)
+        dest_file = pjoin(dest_path, src)
+        if not exists(dest_file):
             LOG.debug("Link {0} -> {1}".format(src_file, dest_file))
             os.symlink(src_file, dest_file)
             files_linked += 1
@@ -135,21 +150,23 @@ def create_dir(dir):
 
     try:
         if returned_dir is not None:
-            returned_dir_path = os.path.dirname(returned_dir)
-            returned_dir_base = os.path.basename(returned_dir)
+            returned_dir_path = dirname(returned_dir)
+            returned_dir_base = basename(returned_dir)
             LOG.debug("returned_dir_path = {}".format(returned_dir_path))
             LOG.debug("returned_dir_base = {}".format(returned_dir_base))
+            returned_dir_path = '.' if returned_dir_path=="" else returned_dir_path
+            LOG.debug("returned_dir_path = {}".format(returned_dir_path))
             # Check if a directory and has write permissions...
-            if not os.path.exists(returned_dir) and os.access(returned_dir_path, os.W_OK):
+            if not exists(returned_dir) and os.access(returned_dir_path, os.W_OK):
                 LOG.debug("Creating directory {} ...".format(returned_dir))
                 os.makedirs(returned_dir)
                 # Check if the created dir has write permissions
                 if not os.access(returned_dir, os.W_OK):
                     msg = "Created dir {} is not writable.".format(returned_dir)
                     raise SipsEnvironment(msg)
-            elif os.path.exists(returned_dir):
+            elif exists(returned_dir):
                 LOG.debug("Directory {} exists...".format(returned_dir))
-                if not(os.path.isdir(returned_dir) and os.access(returned_dir, os.W_OK)):
+                if not(isdir(returned_dir) and os.access(returned_dir, os.W_OK)):
                     msg = "Existing dir {} is not writable.".format(returned_dir)
                     raise SipsEnvironment(msg)
             else:

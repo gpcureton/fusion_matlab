@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 # encoding: utf-8
+"""
 
+Purpose: Run the fusion_matlab package
+
+Copyright (c) 2015 University of Wisconsin Regents.
+Licensed under GNU GPLv3.
+"""
 import sys
 import traceback
 import calendar
@@ -65,7 +71,7 @@ comp = FUSION_MATLAB()
 LOG.info("Submitting intervals...")
 
 dt = datetime.utcnow()
-log_name = '/home/flo/geoffc/fusion_matlab_logs/fusion_matlab_{}_s{}_e{}_c{}.log'.format(
+log_name = 'fusion_matlab_{}_s{}_e{}_c{}.log'.format(
     satellite,
     intervals[0].left.strftime('%Y%m%d%H%M'),
     intervals[-1].right.strftime('%Y%m%d%H%M'),

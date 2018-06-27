@@ -5,28 +5,26 @@ import logging
 from timeutil import TimeInterval, datetime, timedelta
 from flo.ui import local_prepare, local_execute
 
-from flo.sw.fusion_matlab import FUSION_MATLAB
+from flo.sw.fusion_matlab import FUSION_MATLAB_QL
 from flo.sw.fusion_matlab.utils import setup_logging
 
 # every module should have a LOG object
 LOG = logging.getLogger(__name__)
 
-comp = FUSION_MATLAB()
+comp = FUSION_MATLAB_QL()
 
 #
 # Local execution
 #
 
 # General information
-#granule = datetime(2015, 4, 17, 14)
+#granule = datetime(2018, 2, 2, 0)
 #interval = TimeInterval(granule, granule+timedelta(minutes=0))
 
 satellite = 'snpp'
 #satellite = 'aqua'
-#delivery_id = '20180225-1'
-#delivery_id = '20180620-1'
+delivery_id = '20180620-1'
 version = '1.0dev2'
-
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
 
@@ -62,7 +60,10 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
     else:
         LOG.error("There are no valid {} contexts for the interval {}.".format(satellite, interval))
 
-def print_contexts(interval, satellite, version):
+def print_contexts(interval, satellite, version, verbosity=2):
+
+    setup_logging(verbosity)
+    
     contexts = comp.find_contexts(interval, satellite, version)
     for context in contexts:
         print context
