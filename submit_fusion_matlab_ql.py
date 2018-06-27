@@ -1,12 +1,6 @@
 #!/usr/bin/env python
 # encoding: utf-8
-"""
 
-Purpose: Run the fusion_matlab package
-
-Copyright (c) 2015 University of Wisconsin Regents.
-Licensed under GNU GPLv3.
-"""
 import sys
 import traceback
 import calendar
@@ -17,7 +11,7 @@ from time import sleep
 from flo.ui import safe_submit_order
 from timeutil import TimeInterval, datetime, timedelta
 
-from flo.sw.fusion_matlab import FUSION_MATLAB
+import flo.sw.fusion_matlab as fusion_matlab
 from flo.sw.fusion_matlab.utils import setup_logging
 
 # every module should have a LOG object
@@ -29,22 +23,29 @@ setup_logging(2)
 # General information
 #
 delivery_id = '20180620-1'
-version = '1.0dev3'
+version = '1.0dev2'
 wedge = timedelta(seconds=1.)
 day = timedelta(days=1.)
+
+#job_mods = {}
+job_mods = {
+    'requirements': ['TARGET.Scratch >= RequestScratch'],
+    'requests': [
+        'Scratch=3',
+        'Memory=8000',
+    ],
+    'classads': ['HookKeyword=SCRATCH'],
+}
 
 #
 # Satellite specific information
 #
-#satellite = 'aqua'
-#granule_length = timedelta(minutes=5)
 satellite = 'snpp'
 granule_length = timedelta(minutes=6)
 
 #
 # Specify the intervals
 #
-#granule = datetime(2015, 4, 17, 17, 55) # Aqua
 granule = datetime(2018, 2, 3, 0, 0) # SNPP
 intervals = [
     #TimeInterval(granule, granule + granule_length - wedge)
@@ -63,7 +64,8 @@ intervals = [
 #
 # Initialize the computation
 #
-comp = FUSION_MATLAB()
+fusion_matlab_comp = fusion_matlab.FUSION_MATLAB()
+comp = fusion_matlab.FUSION_MATLAB_QL()
 
 #
 # Submit the jobs
@@ -71,7 +73,7 @@ comp = FUSION_MATLAB()
 LOG.info("Submitting intervals...")
 
 dt = datetime.utcnow()
-log_name = 'fusion_matlab_{}_s{}_e{}_c{}.log'.format(
+log_name = '/home/flo/geoffc/fusion_matlab_logs/fusion_matlab_ql_{}_s{}_e{}_c{}.log'.format(
     satellite,
     intervals[0].left.strftime('%Y%m%d%H%M'),
     intervals[-1].right.strftime('%Y%m%d%H%M'),
@@ -98,7 +100,7 @@ try:
 
             try:
                 job_nums = []
-                job_nums = safe_submit_order(comp, [comp.dataset('fused_l1b')], contexts)
+                job_nums = safe_submit_order(comp, [comp.dataset(o) for o in comp.outputs], contexts, job_mods=job_mods, download_onlies=[fusion_matlab_comp])
 
                 if job_nums != []:
                     #job_nums = range(len(contexts))
