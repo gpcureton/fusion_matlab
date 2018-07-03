@@ -823,6 +823,9 @@ class FUSION_MATLAB_QL(Computation):
         if vgeom == []:
             raise WorkflowNotReady('Missing {} inputs for version {} and interval {}'.format(
                 input_name, version, interval))
+        if len(vgeom) < 228:
+            raise WorkflowNotReady('Number of available {} inputs is < 228, for version {} and interval {}, aborting...'.format(
+                input_name, version, interval))
         for idx, geo_file in enumerate(vgeom):
             LOG.debug('V03MOD granule {}: {} -> {}'.format(idx, geo_file.begin_time, geo_file.end_time))
             task.input('geo_{}'.format(idx),  geo_file)
@@ -837,6 +840,9 @@ class FUSION_MATLAB_QL(Computation):
         vl1b = dawg_catalog.files(satellite, input_name, interval, version=version)
         if vl1b == []:
             raise WorkflowNotReady('Missing {} inputs for version {} and interval {}'.format(
+                input_name, version, interval))
+        if len(vl1b) < 228:
+            raise WorkflowNotReady('Number of available {} inputs is < 228, for version {} and interval {}, aborting...'.format(
                 input_name, version, interval))
         for idx, l1b_file in enumerate(vl1b):
             LOG.debug('V02FSN granule {}: {} -> {}'.format(idx, l1b_file.begin_time, l1b_file.end_time))
