@@ -1015,14 +1015,12 @@ class FUSION_MATLAB_QL(Computation):
         os.chdir(geo_dir)
         geo_keys = [key for key in inputs.keys() if 'geo' in key]
         geo_inputs = {key: inputs[key] for key in geo_keys}
-        LOG.info(geo_inputs)
         symlink_inputs_to_working_dir(geo_inputs)
         os.chdir(current_dir)
 
         os.chdir(fsn_dir)
         fsn_keys = [key for key in inputs.keys() if 'l1b' in key]
         fsn_inputs = {key: inputs[key] for key in fsn_keys}
-        LOG.info(fsn_inputs)
         symlink_inputs_to_working_dir(fsn_inputs)
         os.chdir(current_dir)
 
