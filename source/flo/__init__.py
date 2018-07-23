@@ -86,11 +86,11 @@ LOG = logging.getLogger(__name__)
 
 class FUSION_MATLAB(Computation):
 
-    parameters = ['granule', 'satellite', 'version']
+    parameters = ['granule', 'satellite', 'type', 'version']
 
     outputs = ['fused_l1b']
 
-    def find_contexts(self, time_interval, satellite, version):
+    def find_contexts(self, time_interval, satellite, type, version):
         '''
         Here we assume that the granule boundaries fall along 6-minute (snpp) or 5-minute (aqua)
         increments, starting at the top of the hour:
@@ -106,7 +106,7 @@ class FUSION_MATLAB(Computation):
         else:
             return []
 
-        return [{'satellite': satellite, 'version': version, 'granule': g}
+        return [{'satellite': satellite, 'version': version, 'type': type, 'granule': g}
                     for g in time_interval.contained_series(granule_length)]
 
     def _add_modis_l1b_geo_input(self, context, task):
@@ -184,7 +184,15 @@ class FUSION_MATLAB(Computation):
     def _add_viirs_l1b_geo_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        version = product.input('viirs_l1').version
+
+        viirs_l1 = product.input('viirs_l1')
+        v02mod_bt_sc = product.input('V02MOD-bt-sc')
+
+        if viirs_l1:
+            version = viirs_l1.version
+        elif v02mod_bt_sc:
+            version = v02mod_bt_sc.input('viirs_l1').version
+
         input_name = sipsprod.satellite_esdt('V03MOD', satellite)
         LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
         vgeom = dawg_catalog.file(satellite, input_name, granule, version=version)
@@ -193,10 +201,29 @@ class FUSION_MATLAB(Computation):
     def _add_viirs_l1b_m_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        version = product.input('viirs_l1').version
-        input_name = sipsprod.satellite_esdt('V02MOD', satellite)
-        LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
-        vl1b = dawg_catalog.file(satellite, input_name, granule, version=version)
+
+        viirs_l1 = product.input('viirs_l1')
+        v02mod_bt_sc = product.input('V02MOD-bt-sc')
+
+        # Standard NASA VIIRS level-1 radiances and BT
+        if viirs_l1:
+            version = viirs_l1.version
+            input_name = sipsprod.satellite_esdt('V02MOD', satellite)
+            LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
+            vl1b = dawg_catalog.file(satellite, input_name, granule, version=version)
+
+        # Standard NASA VIIRS level-1 radiances and BT, bias corrected to match MODIS (or something...)
+        elif v02mod_bt_sc:
+            version = v02mod_bt_sc.version
+            input_name = sipsprod.satellite_esdt('V02MOD-bt-sc', satellite)
+            LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
+            from flo.sw.v02mod_bt_sc import v02mod_bt_sc
+            vl1b = v02mod_bt_sc().dataset('out').product(
+                {'granule': context['granule'], 'satellite': context['satellite'],
+                 'nrt': False, 'version': version})
+        else:
+            raise ValueError('V02MOD -- missing one of (V02MOD, V02MOD-bc) input for VIIRS')
+
         task.input('l1b', vl1b)
 
     def _add_cris_l1b_input(self, product, context, task):
@@ -223,7 +250,9 @@ class FUSION_MATLAB(Computation):
         LOG.debug("Ingesting inputs for V02FSN version {} ...".format(context['version']))
 
         # Get the product definition for 'V02FSN'
-        product = sipsprod.lookup_product_recurse('V02FSN', version=context['version'])
+        type = context['type']
+        product_name = 'V02FSN-{}'.format(type) if 'base' not in type else 'V02FSN'
+        product = sipsprod.lookup_product_recurse(product_name, version=context['version'])
 
         # Ingest the required inputs, defined in the VNP02 product definition for context['version']
         self._add_viirs_l1b_geo_input(product, context, task)
@@ -390,7 +419,7 @@ class FUSION_MATLAB(Computation):
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
-            return rc_fusion, []
+            return rc_fusion, None
 
         # Move matlab file to the fused outputs directory
         matlab_file = glob(matlab_file_glob)
@@ -405,7 +434,7 @@ class FUSION_MATLAB(Computation):
         else:
             LOG.error('There are no Matlab files "{}" to convert, aborting'.format(matlab_file_glob))
             rc_fusion = 1
-            return rc_fusion, []
+            return rc_fusion, None
 
         return rc_fusion, matlab_file
 
@@ -478,7 +507,7 @@ class FUSION_MATLAB(Computation):
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("CF converter {} returned a value of {}".format(conversion_bin, rc_fusion))
-            return rc_fusion, []
+            return rc_fusion, None, {}
 
         # Determine success...
         LOG.debug('Looking for fused output file "{}"'.format(fused_l1b_file))
@@ -489,7 +518,7 @@ class FUSION_MATLAB(Computation):
         else:
             LOG.error('There is no fused file {}, aborting'.format(fused_l1b_file))
             rc_fusion = 1
-            return rc_fusion, []
+            return rc_fusion, None, {}
 
         # Remove the unfused dir...
         #LOG.debug('Removing the unfused level-1b dir {} ...'.format(unfused_l1b_dir))
@@ -677,7 +706,14 @@ class FUSION_MATLAB(Computation):
         # Run viirsmend on the viirs level-1b, and generate the CrIS/VIIRS collocation
         if satellite == 'snpp':
             geo = inputs['geo']
-            l1b = self.mend_viirs_l1b(product, inputs['geo'], inputs['l1b'], dummy=dummy)
+            if context['type'] == 'bc':
+                # Bias corrected l1b has already been mended, so just copy to working dir
+                l1b = basename(inputs['l1b'])
+                shutil.copy(inputs['l1b'], l1b)
+            else:
+                # Mend bowtie pixels of NASA VIIRS l1b file...
+                l1b = self.mend_viirs_l1b(product, inputs['geo'], inputs['l1b'], dummy=dummy)
+
             sounder_keys = [key for key in inputs.keys() if 'sounder' in key]
             sounder = [inputs[key] for key in sounder_keys]
             collo = self.cris_viirs_collocation(product, inputs, dummy=dummy)
@@ -738,6 +774,9 @@ class FUSION_MATLAB(Computation):
         LOG.debug('run_fusion_matlab() return value: {}'.format(rc_fusion))
         LOG.info('run_fusion_matlab() generated {}'.format(matlab_file))
 
+        if matlab_file is None:
+            raise RuntimeError('Output fusion file fusion_output.mat not created.')
+
         # Now that we've computed the Matlab file, convert to a NetCDF file...
         rc_fusion, fused_l1b_file, output_attrs = self.convert_matlab_to_netcdf(
                                                                                product,
@@ -747,6 +786,9 @@ class FUSION_MATLAB(Computation):
 
         LOG.debug('convert_matlab_to_netcdf() return value: {}'.format(rc_fusion))
         LOG.info('convert_matlab_to_netcdf() generated {}'.format(fused_l1b_file))
+
+        if fused_l1b_file is None:
+            raise RuntimeError('NetCDF output fusion file was not created.')
 
         # Update some global attributes in the output file
         #readme_file =  pjoin(delivery.path, 'README.txt')
@@ -765,7 +807,14 @@ class FUSION_MATLAB(Computation):
 
         # Set metadata to be put in the output file.
         if satellite == 'snpp':
-            l1_version = product.input('viirs_l1').version
+            viirs_l1 = product.input('viirs_l1')
+            v02mod_bt_sc = product.input('V02MOD-bt-sc')
+
+            if viirs_l1:
+                l1_version = product.input('viirs_l1').version
+            elif v02mod_bt_sc:
+                l1_version = v02mod_bt_sc.input('viirs_l1').version
+
             input_fns, lut_version, lut_created = get_viirs_l1_luts(l1b, geo_fn=geo)
             ancillary_fns = []
             out_compress = nc_compress

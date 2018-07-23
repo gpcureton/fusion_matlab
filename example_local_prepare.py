@@ -23,12 +23,11 @@ comp = FUSION_MATLAB()
 
 satellite = 'snpp'
 #satellite = 'aqua'
-#delivery_id = '20180225-1'
-#delivery_id = '20180620-1'
-version = '1.0dev2'
+#type, version = 'base', '1.0dev3'
+type, version = 'bc', '1.0dev1'
 
 
-def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
+def local_execute_example(interval, satellite, type, version, skip_prepare=False, skip_execute=False, verbosity=2):
 
     setup_logging(verbosity)
 
@@ -40,7 +39,7 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
         LOG.error("Invalid satellite.")
 
     # Get the required context...
-    contexts =  comp.find_contexts(interval, satellite, version)
+    contexts =  comp.find_contexts(interval, satellite, type, version)
 
     if len(contexts) != 0:
         LOG.info("Candidate contexts in interval...")
@@ -62,7 +61,7 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
     else:
         LOG.error("There are no valid {} contexts for the interval {}.".format(satellite, interval))
 
-def print_contexts(interval, satellite, version):
-    contexts = comp.find_contexts(interval, satellite, version)
+def print_contexts(interval, satellite, type, version):
+    contexts = comp.find_contexts(interval, satellite, type, version)
     for context in contexts:
         print context
