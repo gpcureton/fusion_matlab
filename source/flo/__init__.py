@@ -86,11 +86,11 @@ LOG = logging.getLogger(__name__)
 
 class FUSION_MATLAB(Computation):
 
-    parameters = ['granule', 'satellite', 'type', 'version']
+    parameters = ['granule', 'satellite', 'version']
 
     outputs = ['fused_l1b']
 
-    def find_contexts(self, time_interval, satellite, type, version):
+    def find_contexts(self, time_interval, satellite, version):
         '''
         Here we assume that the granule boundaries fall along 6-minute (snpp) or 5-minute (aqua)
         increments, starting at the top of the hour:
@@ -106,7 +106,7 @@ class FUSION_MATLAB(Computation):
         else:
             return []
 
-        return [{'satellite': satellite, 'version': version, 'type': type, 'granule': g}
+        return [{'satellite': satellite, 'version': version, 'granule': g}
                     for g in time_interval.contained_series(granule_length)]
 
     def _add_modis_l1b_geo_input(self, context, task):
@@ -249,9 +249,9 @@ class FUSION_MATLAB(Computation):
         '''
         LOG.debug("Ingesting inputs for V02FSN version {} ...".format(context['version']))
 
-        # Get the product definition for 'V02FSN'
-        type = context['type']
-        product_name = 'V02FSN-{}'.format(type) if 'base' not in type else 'V02FSN'
+        # Get the product definition for 'V02FSN'. Different versions may use regular or bias
+        # corrected VIIRS level-1b files.
+        product_name = 'V02FSN'
         product = sipsprod.lookup_product_recurse(product_name, version=context['version'])
 
         # Ingest the required inputs, defined in the VNP02 product definition for context['version']
@@ -610,11 +610,11 @@ class FUSION_MATLAB(Computation):
 
         # Update the various file global attributes
         LOG.debug('Adding attributes to {} ...'.format(netcdf_file))
-        if netcdf_file.split('.')[-1] == 'nc':
+        if splitext(netcdf_file)[-1] == '.nc':
             args = (netcdf_file, "a")
             kwargs = {'format': "NETCDF4"}
             file_open = Dataset
-        elif netcdf_file.split('.')[-1] == 'hdf':
+        if splitext(netcdf_file)[-1] == '.hdf':
             args = (netcdf_file, SDC.WRITE)
             kwargs = {}
             file_open = SD
@@ -706,7 +706,8 @@ class FUSION_MATLAB(Computation):
         # Run viirsmend on the viirs level-1b, and generate the CrIS/VIIRS collocation
         if satellite == 'snpp':
             geo = inputs['geo']
-            if context['type'] == 'bc':
+
+            if 'bowtie' in basename(inputs['l1b']):
                 # Bias corrected l1b has already been mended, so just copy to working dir
                 l1b = basename(inputs['l1b'])
                 shutil.copy(inputs['l1b'], l1b)
