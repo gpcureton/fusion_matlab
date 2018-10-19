@@ -23,8 +23,7 @@ comp = FUSION_MATLAB_QL()
 
 satellite = 'snpp'
 #satellite = 'aqua'
-delivery_id = '20180620-1'
-version = '1.0dev2'
+version = '1.0dev5' # base VIIRS level-1b
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
 
@@ -47,11 +46,11 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
 
         try:
             if not skip_prepare:
-                LOG.info("Running fusion_matlab local_prepare()...")
+                LOG.info("Running fusion_matlab_ql local_prepare()...")
                 LOG.info("Preparing context... {}".format(contexts[0]))
                 local_prepare(comp, contexts[0])
             if not skip_execute:
-                LOG.info("Running local_execute()...")
+                LOG.info("Running fusion_matlab_ql local_execute()...")
                 LOG.info("Running context... {}".format(contexts[0]))
                 local_execute(comp, contexts[0])
         except Exception, err:

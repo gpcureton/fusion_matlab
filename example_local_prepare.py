@@ -23,9 +23,7 @@ comp = FUSION_MATLAB()
 
 satellite = 'snpp'
 #satellite = 'aqua'
-version = '1.0dev4' # base VIIRS l1vel-1b
-version = '1.0dev5' # bias corrected VIIRS level-1b
-
+version = '1.0dev7' # base VIIRS level-1b
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
 
@@ -61,7 +59,7 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
     else:
         LOG.error("There are no valid {} contexts for the interval {}.".format(satellite, interval))
 
-def print_contexts(interval, satellite, type, version):
+def print_contexts(interval, satellite, version):
     contexts = comp.find_contexts(interval, satellite, version)
     for context in contexts:
         print context

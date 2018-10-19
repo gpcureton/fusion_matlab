@@ -61,6 +61,9 @@ Thumbs.db
 # pycharm projects
 .idea
 
+# Visual Studio
+.vscode
+
 # Compiled object files
 *.o
 
@@ -75,10 +78,5 @@ Thumbs.db
 
 # VIM swap files
 .*.sw*
-
-### Various OS Files ###
-.DS_Store
-._.DS_Store
-Thumbs.db
 
 # repos specific ignores

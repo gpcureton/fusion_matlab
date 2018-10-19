@@ -28,7 +28,7 @@ from datetime import datetime
 LOG = logging.getLogger(__name__)
 
 def setup_logging(verbosity):
-    LOG.debug("Verbosity is {}".format(verbosity))
+    print("Verbosity is {}".format(verbosity))
 
     levels = [logging.ERROR, logging.WARN, logging.INFO, logging.DEBUG]
     level = levels[verbosity if verbosity < 4 else 3]
@@ -38,9 +38,13 @@ def setup_logging(verbosity):
     #console_logFormat = '%(levelname)s:%(name)s:%(msg)s') # [%(filename)s:%(lineno)d]'
     #console_logFormat = '%(asctime)s : %(funcName)s:%(lineno)d:  %(message)s'
     #console_logFormat = '%(message)s'
-    console_logFormat = '(%(levelname)s):%(filename)s:%(funcName)s:%(lineno)d:  %(message)s'
+    #console_logFormat = '(%(levelname)s):%(filename)s:%(funcName)s:%(lineno)d:  %(message)s'
     #console_logFormat = '%(asctime)s : (%(levelname)s):%(filename)s:%(funcName)s:%(lineno)d:' \
         #' %(message)s'
+    if level == logging.DEBUG:
+        console_logFormat = '(%(levelname)s):%(filename)s:%(funcName)s:%(lineno)d:  %(message)s'
+    else:
+        console_logFormat = '(%(levelname)s): %(message)s'
 
     dateFormat = '%Y-%m-%d %H:%M:%S'
     logging.basicConfig(
