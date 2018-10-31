@@ -193,7 +193,7 @@ class FUSION_MATLAB(Computation):
         '''
         Build up a set of inputs for a single context
         '''
-        LOG.info("Ingesting inputs for M02FSN version {} ...".format(context['version']))
+        LOG.debug("Ingesting inputs for M02FSN version {} ...".format(context['version']))
 
         # Get the product definition for 'V02FSN'
         product = sipsprod.lookup_product_recurse('V02FSN', version=context['version'])
@@ -226,8 +226,15 @@ class FUSION_MATLAB(Computation):
 
         LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
         vgeom = dawg_catalog.files(satellite, input_name, interval, version=version)
+
         if vgeom == []:
             raise WorkflowNotReady('FUSION_MATLAB: Missing {} inputs for version {} and interval {}'.format(
+                input_name, version, interval))
+        if len(vgeom) != 3:
+            LOG.warn('Insufficient VIIRS GEO granules (should be 3 granules) for {}...'.format(granule))
+            for idx, vgeom_file in enumerate(vgeom):
+                LOG.debug('\tVIIRS GEO granule {}: {} -> {}'.format(idx, vgeom_file.begin_time, vgeom_file.end_time))
+            raise WorkflowNotReady('FUSION_MATLAB: Insufficient {} inputs for version {} and interval {}'.format(
                 input_name, version, interval))
 
         for idx, vgeom_file in enumerate(vgeom):
@@ -266,6 +273,16 @@ class FUSION_MATLAB(Computation):
         else:
             raise ValueError('V02MOD -- missing one of (V02MOD, V02MOD-bc) input for VIIRS')
 
+        if vl1b == []:
+            raise WorkflowNotReady('FUSION_MATLAB: Missing {} inputs for version {} and interval {}'.format(
+                input_name, version, interval))
+        if len(vl1b) != 3:
+            LOG.warn('Insufficient VIIRS L1B granules (should be 3 granules) for  {}...'.format(granule))
+            for idx, vl1b_file in enumerate(vl1b):
+                LOG.debug('\tVIIRS L1B granule {}: {} -> {}'.format(idx, vl1b_file.begin_time, vl1b_file.end_time))
+            raise WorkflowNotReady('FUSION_MATLAB: Insufficient {} inputs for version {} and interval {}'.format(
+                input_name, version, interval))
+
         for idx, vl1b_file in enumerate(vl1b):
             LOG.debug('VIIRS L1B granule {}: {} -> {}'.format(idx, vl1b_file.begin_time, vl1b_file.end_time))
             task.input('l1b_{}'.format(idx),  vl1b_file)
@@ -283,8 +300,15 @@ class FUSION_MATLAB(Computation):
         input_name = 'CL1B'
         LOG.debug("Ingesting input {} ({}) for V02FSN version {}".format(input_name, version, product.version))
         cris = dawg_catalog.files(satellite, input_name, interval, version=version)
+
         if cris == []:
             raise WorkflowNotReady('FUSION_MATLAB: Missing {} inputs for version {} and interval {}'.format(
+                input_name, version, interval))
+        if len(cris) != 3:
+            LOG.warn('Insufficient CrIS L1B granules (should be 3 granules) for {}...'.format(granule))
+            for idx, cris_file in enumerate(cris):
+                LOG.debug('\tCrIS L1B granule {}: {} -> {}'.format(idx, cris_file.begin_time, cris_file.end_time))
+            raise WorkflowNotReady('FUSION_MATLAB: Insufficient {} inputs for version {} and interval {}'.format(
                 input_name, version, interval))
 
         for idx, cris_file in enumerate(cris):
@@ -949,7 +973,7 @@ class FUSION_MATLAB_QL(Computation):
         version = product.input('V02FSN').version
         input_name = sipsprod.satellite_esdt('V02FSN', satellite)
         interval = TimeInterval(granule, granule+timedelta(days=1.00)-timedelta(seconds=1))
-        LOG.info("Ingesting input {} ({}) for V02FSN_DailyQL version {}".format(input_name, version, product.version))
+        LOG.debug("Ingesting input {} ({}) for V02FSN_DailyQL version {}".format(input_name, version, product.version))
         vl1b = dawg_catalog.files(satellite, input_name, interval, version=version)
         if vl1b == []:
             raise WorkflowNotReady('Missing {} inputs for version {} and interval {}'.format(
