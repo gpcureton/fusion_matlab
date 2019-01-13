@@ -92,14 +92,15 @@ class FUSION_MATLAB(Computation):
 
     def find_contexts(self, time_interval, satellite, version):
         '''
-        Here we assume that the granule boundaries fall along 6-minute (snpp) or 5-minute (aqua)
-        increments, starting at the top of the hour:
+        Here we assume that the granule boundaries fall along 6-minute (snpp/jpss1) or 
+        5-minute (aqua) increments, starting at the top of the hour:
 
-        SNPP: [0.,   6.,  12.,  18.,  24.,  30.,  36.,  42.,  48.,  54.]
-        AQUA: [0.,   5.,  10.,  15.,  20.,  25.,  30.,  35.,  40.,  45.,  50., 55.]
+        SNPP:  [0.,   6.,  12.,  18.,  24.,  30.,  36.,  42.,  48.,  54.]
+        JPSS1: [0.,   6.,  12.,  18.,  24.,  30.,  36.,  42.,  48.,  54.]
+        AQUA:  [0.,   5.,  10.,  15.,  20.,  25.,  30.,  35.,  40.,  45.,  50., 55.]
         '''
 
-        if satellite=='snpp':
+        if satellite=='snpp' or satellite=='jpss1':
             granule_length = timedelta(minutes=6)
         elif satellite=='aqua':
             granule_length = timedelta(minutes=5)
@@ -339,7 +340,7 @@ class FUSION_MATLAB(Computation):
 
         satellite = context['satellite']
 
-        if satellite == 'snpp':
+        if satellite=='snpp' or satellite=='jpss1':
             self.build_task_snpp(context, task)
         elif satellite == 'aqua':
             self.build_task_aqua(context, task)
@@ -525,6 +526,8 @@ class FUSION_MATLAB(Computation):
         if dummy:
             if satellite=='snpp':
                 dummy_fusion_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmp5PwThb/VNP02FSN.A2018033.1836.001.2018058173216.nc'
+            if satellite=='jpss1':
+                dummy_fusion_file = '/mnt/sdata/geoffc/fusion_matlab/work/snpp_temp_outputs/outputs/tmp5PwThb/VNP02FSN.A2018033.1836.001.2018058173216.nc'
             if satellite=='aqua':
                 dummy_fusion_file = '/mnt/sdata/geoffc/fusion_matlab/work/aqua_temp_outputs/outputs/tmpMUoHF3/MYD02FSN.A2015107.1755.006.2018058170733.hdf'
 
@@ -634,11 +637,11 @@ class FUSION_MATLAB(Computation):
         satellite = kwargs['satellite']
         LOG.debug('satellite = {}'.format(satellite))
 
-        band_default = {'aqua':[31, 32], 'snpp':[15, 16]}
+        band_default = {'aqua':[31, 32], 'snpp':[15, 16], 'jpss1':[15, 16]}
         if band is None:
             band = band_default[satellite]
 
-        input_files = [fused_l1b_file] if satellite=='snpp' else [l1b_file, fused_l1b_file]
+        input_files = [fused_l1b_file] if (satellite=='snpp' or satellite=='jpss1') else [l1b_file, fused_l1b_file]
 
         generators = list(SFX[splitext(p)[-1].lower()](p, band) for p in input_files)
         stuff = list(chain(*generators))
@@ -787,7 +790,7 @@ class FUSION_MATLAB(Computation):
         LOG.debug("sounder = \n\t{}".format('\n\t'.join(sounder)))
 
         # Run viirsmend on the viirs level-1b, and generate the CrIS/VIIRS collocation
-        if satellite == 'snpp':
+        if satellite=='snpp' or satellite=='jpss1':
 
             for idx, l1b_file in enumerate(l1b):
                 if 'bowtie' in basename(l1b_file):
@@ -827,7 +830,7 @@ class FUSION_MATLAB(Computation):
         kwargs['granule'] = granule
         kwargs['dummy'] = dummy
 
-        if satellite=='snpp':
+        if satellite=='snpp' or satellite=='jpss1':
             geo_file = geo[1]
             l1b_file = l1b[1]
             kwargs['anc_paths'] = [pjoin(anc_dir, 'modis_aqua.srf.nc'),
@@ -892,7 +895,7 @@ class FUSION_MATLAB(Computation):
         out_fn = basename(fused_l1b_file)
 
         # Set metadata to be put in the output file.
-        if satellite == 'snpp':
+        if satellite=='snpp' or satellite=='jpss1':
             viirs_l1 = product.input('viirs_l1')
             v02mod_bt_sc = product.input('V02MOD-bt-sc')
 
@@ -932,7 +935,7 @@ class FUSION_MATLAB_QL(Computation):
         Takes the input time interval, and returns whatever 0Z datetimes fall within the interval.
         '''
 
-        if satellite=='snpp':
+        if satellite=='snpp' or satellite=='jpss1':
             granule_length = timedelta(minutes=6)
         elif satellite=='aqua':
             granule_length = timedelta(minutes=5)
@@ -1008,7 +1011,7 @@ class FUSION_MATLAB_QL(Computation):
 
         satellite = context['satellite']
 
-        if satellite == 'snpp':
+        if satellite=='snpp' or satellite=='jpss1':
             self.build_task_snpp(context, task)
         elif satellite == 'aqua':
             raise ValueError('Satellite option "{}" not yet implemented.'.format(satellite))
