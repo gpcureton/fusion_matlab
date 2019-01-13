@@ -59,7 +59,8 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
     else:
         LOG.error("There are no valid {} contexts for the interval {}.".format(satellite, interval))
 
-def print_contexts(interval, satellite, version):
+def print_contexts(interval, satellite, version, verbosity=2):
+    setup_logging(verbosity)
     contexts = comp.find_contexts(interval, satellite, version)
     for context in contexts:
         print context
