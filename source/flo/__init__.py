@@ -92,7 +92,7 @@ class FUSION_MATLAB(Computation):
 
     def find_contexts(self, time_interval, satellite, version):
         '''
-        Here we assume that the granule boundaries fall along 6-minute (snpp/jpss1) or 
+        Here we assume that the granule boundaries fall along 6-minute (snpp/jpss1) or
         5-minute (aqua) increments, starting at the top of the hour:
 
         SNPP:  [0.,   6.,  12.,  18.,  24.,  30.,  36.,  42.,  48.,  54.]
@@ -1158,12 +1158,16 @@ class FUSION_MATLAB_QL(Computation):
         geo_keys = [key for key in inputs.keys() if 'geo' in key]
         geo_inputs = {key: inputs[key] for key in geo_keys}
         symlink_inputs_to_working_dir(geo_inputs)
+        for geo_file in glob('VJ103*.nc'):
+            shutil.move(geo_file, geo_file.replace('VJ103', 'VNP03'))
         os.chdir(current_dir)
 
         os.chdir(fsn_dir)
         fsn_keys = [key for key in inputs.keys() if 'l1b' in key]
         fsn_inputs = {key: inputs[key] for key in fsn_keys}
         symlink_inputs_to_working_dir(fsn_inputs)
+        for geo_file in glob('VJ102*.nc'):
+            shutil.move(geo_file, geo_file.replace('VJ102', 'VNP02'))
         os.chdir(current_dir)
 
         # Setup the require keyword arguments for the fusion_matlab package

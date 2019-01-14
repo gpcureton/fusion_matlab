@@ -22,8 +22,9 @@ comp = FUSION_MATLAB()
 #interval = TimeInterval(granule, granule+timedelta(minutes=0))
 
 satellite = 'snpp'
+#satellite = 'jpss1'
 #satellite = 'aqua'
-version = '1.0dev7' # base VIIRS level-1b
+version = '1.0dev10' # base VIIRS level-1b
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
 
@@ -31,6 +32,8 @@ def local_execute_example(interval, satellite, version, skip_prepare=False, skip
 
     if satellite == 'snpp':
         LOG.info("We are doing NPP...")
+    if satellite == 'jpss1':
+        LOG.info("We are doing JPSS-1 / NOAA-20...")
     elif satellite == 'aqua':
         LOG.info("We are doing AQUA...")
     else:
