@@ -65,7 +65,7 @@ def run_fusion_quicklooks(fusion_dir, geo_dir, **kwargs):
     satellite = kwargs['satellite']
     env = kwargs['env']
 
-    fusion_prefix = {'snpp':'VNP', 'jpss1':'VJ1'}[satellite]
+    fusion_prefix = {'snpp':'VNP', 'noaa20':'VJ1'}[satellite]
     fusion_files = sorted(glob(pjoin(fusion_dir,'{}02FSN*.nc'.format(fusion_prefix))))
     geo_files = sorted(glob(pjoin(geo_dir,'{}03MOD*.nc'.format(fusion_prefix))))
 
@@ -174,7 +174,7 @@ if __name__ == '__main__':
             FUSION_DIR : Directory containing V02FSN files"
             GEO_DIR : Directory containing V03MOD files matching the files in FUSION_DIR"
             OUTPUT_DIR : Directory where fusion quicklooks are generated"
-            SATELLITE : The satellite providing the input data (snpp or jpss1)"
+            SATELLITE : The satellite providing the input data (snpp or noaa20)"
         """
 
     if len(args) != 5:

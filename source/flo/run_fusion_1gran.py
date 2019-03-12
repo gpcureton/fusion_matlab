@@ -132,7 +132,7 @@ def convert_matlab_to_netcdf(matlab_file, l1b_file, **kwargs):
     LOG.debug("l1b_file = {}".format(l1b_file))
 
     # Copy the un-fused level-1b file to the work directory as a template...
-    if satellite=='snpp' or satellite=='jpss1':
+    if satellite=='snpp' or satellite=='noaa20':
         esdt = satellite_esdt('V02FSN', satellite)
         collection = int(basename(l1b_file).split('.')[3])
         fused_l1b_file_new = product_filename(esdt, collection, dt, created=dt_create)
@@ -280,7 +280,7 @@ def main(args):
         kwargs['anc_paths'] = [pjoin(anc_dir, 'modis_aqua.srf.nc'),
                                pjoin(anc_dir, 'NG_VIIRS_NPP_RSR_filtered_Oct2011_BA/')]
 
-        kwargs['satellite'] = {'VNP':'snpp', 'VJ1':'jpss1'}[basename(geo_files[0]).split('.')[0][:3]]
+        kwargs['satellite'] = {'VNP':'snpp', 'VJ1':'noaa20'}[basename(geo_files[0]).split('.')[0][:3]]
         kwargs['fusion_binary'] = 'run_imagersounderfusion_V.sh'
         kwargs['matlab_file_glob'] = 'fusion_output.mat'
         kwargs['conversion_bin'] = pjoin(py_env_dir, 'bin', 'l1b-fusion-viirs-cris')
