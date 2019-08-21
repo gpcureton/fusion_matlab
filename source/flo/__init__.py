@@ -83,6 +83,15 @@ from detect_bad_fusion import SFX, detect
 # every module should have a LOG object
 LOG = logging.getLogger(__name__)
 
+class FusionProcessFailed(Exception):
+    exit_code = 6001
+class FusionFailedToProduceMat(Exception):
+    exit_code = 6002
+class CFConversionFailed(Exception):
+    exit_code = 6003
+class CFConversionFailedToProductNC(Exception):
+    exit_code = 6004
+
 class FUSION_MATLAB(Computation):
 
     parameters = ['granule', 'satellite', 'version']
@@ -394,8 +403,8 @@ class FUSION_MATLAB(Computation):
 
         if not dummy:
             for cris, vgeo in zip(sounder, geo):
-                cmd = '{} {} {} > /dev/null'.format(crisviirs_exe, cris, vgeo)
-                #cmd = '{} {} {} > {}.log'.format(crisviirs_exe, cris, vgeo, basename(cris)) # DEBUG
+                #cmd = '{} {} {} > /dev/null'.format(crisviirs_exe, cris, vgeo)
+                cmd = '{} {} {} > {}.log'.format(crisviirs_exe, cris, vgeo, basename(cris))
 
                 runscript(cmd, requirements=[])
         else:
@@ -496,7 +505,8 @@ class FUSION_MATLAB(Computation):
         except CalledProcessError as err:
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
-            return rc_fusion, None
+            raise FusionProcessFailed('Matlab binary {} failed or was killed, returning a value of {}'.format(fusion_binary, rc_fusion))
+            #return rc_fusion, None
 
         # Move matlab file to the fused outputs directory
         matlab_file = glob(matlab_file_glob)
@@ -510,8 +520,9 @@ class FUSION_MATLAB(Computation):
             matlab_file = glob(pjoin(fused_output_dir, matlab_file))[0]
         else:
             LOG.error('There are no Matlab files "{}" to convert, aborting'.format(matlab_file_glob))
-            rc_fusion = 1
-            return rc_fusion, None
+            raise FusionFailedToProduceMat('Matlab binary {} failed to produce the file "{}"'.format(fusion_binary, matlab_file_glob))
+            #rc_fusion = 1
+            #return rc_fusion, None
 
         return rc_fusion, matlab_file
 
@@ -591,7 +602,8 @@ class FUSION_MATLAB(Computation):
             except CalledProcessError as err:
                 rc_fusion = err.returncode
                 LOG.error("CF converter {} returned a value of {}".format(conversion_bin, rc_fusion))
-                return rc_fusion, None, {}
+                raise CFConversionFailed('CF converter {} failed or was killed, returning a value of {}'.format(conversion_bin, rc_fusion))
+                #return rc_fusion, None, {}
 
         else:
 
@@ -613,8 +625,9 @@ class FUSION_MATLAB(Computation):
             LOG.debug('Found final fused output file "{}"'.format(viirs_fused_l1b_file))
         else:
             LOG.error('There is no fused file {}, aborting'.format(viirs_fused_l1b_file))
-            rc_fusion = 1
-            return rc_fusion, None, {}
+            raise CFConversionFailedToProductNC('CF converter {} failed to produce the file "{}"'.format(conversion_bin, viirs_fused_l1b_file))
+            #rc_fusion = 1
+            #return rc_fusion, None, {}
 
 
         # Move the NetCDF4 file to its new filename
