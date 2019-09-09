@@ -91,6 +91,8 @@ class CFConversionFailed(Exception):
     exit_code = 6003
 class CFConversionFailedToProductNC(Exception):
     exit_code = 6004
+class NCL2MetadataFailed(Exception):
+    exit_code = 6005
 
 class FUSION_MATLAB(Computation):
 
@@ -296,24 +298,50 @@ class FUSION_MATLAB(Computation):
             LOG.debug('VIIRS L1B granule {}: {} -> {}'.format(idx, vl1b_file.begin_time, vl1b_file.end_time))
             task.input('l1b_{}'.format(idx),  vl1b_file)
 
+    def get_cris_l1b_version(self, product, context):
+        '''
+        Return the correct CrIS version and input name depending on the target granule, as the
+        required version and input name may differ from that given in the product definition for a
+        given granule.
+        '''
+
+        satellite = context['satellite']
+        granule = context['granule']
+
+        input_name = 'CL1B'
+        version = product.input('cris_l1').version
+
+        if satellite == 'snpp':
+
+            while True:
+                # Use CL1B_nsr (2.0.15) before dt_switch_nsr
+                dt_switch_nsr = datetime(2015, 12, 1, 0)
+                if (granule - dt_switch_nsr).total_seconds() <= 0.:
+                    input_name = 'CL1B_nsr'
+                    version = '2.0.15'
+                    break
+
+                # Use CL1B (2.0.15) before dt_switch_side2
+                dt_switch_side2 = datetime(2019, 6, 24, 18, 48)
+                if (granule - dt_switch_side2).total_seconds() <= 0.:
+                    input_name = 'CL1B'
+                    version = '2.0.15'
+                    break
+
+                # We're after the special cases, use what's in the product definition
+                break
+
+        return input_name, version
+
     def _add_cris_l1b_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
         granule_length = timedelta(minutes=6)
 
-        cris_l1 = product.input('cris_l1')
-
         interval = TimeInterval(granule-granule_length, granule+granule_length)
 
-        version = cris_l1.version
+        input_name, version = self.get_cris_l1b_version(product, context)
 
-        # SNPP CrIS hardware switch-over requires two different cris_l1 versions
-        if satellite == 'snpp':
-            dt_switch = datetime(2019, 6, 24)
-            if (granule - dt_switch).total_seconds() <= 0.:
-                version = '2.0.15'
-
-        input_name = 'CL1B'
         LOG.debug("Ingesting input {} ({}) for FSNRAD_L2_VIIRS_CRIS version {}".format(input_name, version, product.version))
         cris = dawg_catalog.files(satellite, input_name, interval, version=version)
 
@@ -376,7 +404,7 @@ class FUSION_MATLAB(Computation):
         cmd = '{} {} {} {}'.format(py_exe, viirsmend_exe, out_fn, geo)
 
         dummy_bowtie_rest_file = sorted(glob(pjoin('/data/geoffc/fusion_matlab/work/local_processing',
-                                                   'snpp_test_case/outputs/tmptkFpCs',
+                                                   'snpp_fusion_output/outputs',
                                                    'VNP02MOD*bowtie*.nc')))
 
         if not dummy:
@@ -388,7 +416,9 @@ class FUSION_MATLAB(Computation):
 
         return out_fn
 
-    def cris_viirs_collocation(self, product, geo, sounder, dummy=False):
+    def cris_viirs_collocation(self, product, context, geo, sounder, dummy=False):
+
+        satellite = context['satellite']
 
         LOG.debug("geo = \n\t{}".format('\n\t'.join(geo)))
         LOG.debug("sounder = \n\t{}".format('\n\t'.join(sounder)))
@@ -398,13 +428,16 @@ class FUSION_MATLAB(Computation):
         crisviirs_exe = pjoin(crisviirs.path,'bin/crisviirs')
 
         dummy_collo_file = sorted(glob(pjoin('/data/geoffc/fusion_matlab/work/local_processing',
-                                                   'snpp_test_case/outputs/tmptkFpCs',
+                                                   'snpp_fusion_output/outputs',
                                                    'colloc.cris_snpp.viirs_m_snpp.*.nc')))
 
         if not dummy:
             for cris, vgeo in zip(sounder, geo):
+                collo_dt = datetime.strptime(basename(cris).split('.')[3],'%Y%m%dT%H%M')
+                collo_log = 'colloc.cris_{0:}.viirs_m_{0:}.{1:%Y%m%dT%H%M%S}_{1:%H%M%S}'.format(
+                        satellite, collo_dt)
                 #cmd = '{} {} {} > /dev/null'.format(crisviirs_exe, cris, vgeo)
-                cmd = '{} {} {} > {}.log'.format(crisviirs_exe, cris, vgeo, basename(cris))
+                cmd = '{} {} {} > {}.log'.format(crisviirs_exe, cris, vgeo, collo_log)
 
                 runscript(cmd, requirements=[])
         else:
@@ -466,8 +499,7 @@ class FUSION_MATLAB(Computation):
         dummy = kwargs['dummy']
         if dummy:
             dummy_matlab_file = pjoin('/data/geoffc/fusion_matlab/work/local_processing',
-                                                    'snpp_fusion_output',
-                                                    'fusion_output.mat')
+                                                    'snpp_fusion_output/outputs/fusion_output.mat')
 
         rc_fusion = 0
 
@@ -506,7 +538,6 @@ class FUSION_MATLAB(Computation):
             rc_fusion = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_binary, rc_fusion))
             raise FusionProcessFailed('Matlab binary {} failed or was killed, returning a value of {}'.format(fusion_binary, rc_fusion))
-            #return rc_fusion, None
 
         # Move matlab file to the fused outputs directory
         matlab_file = glob(matlab_file_glob)
@@ -521,8 +552,6 @@ class FUSION_MATLAB(Computation):
         else:
             LOG.error('There are no Matlab files "{}" to convert, aborting'.format(matlab_file_glob))
             raise FusionFailedToProduceMat('Matlab binary {} failed to produce the file "{}"'.format(fusion_binary, matlab_file_glob))
-            #rc_fusion = 1
-            #return rc_fusion, None
 
         return rc_fusion, matlab_file
 
@@ -608,7 +637,7 @@ class FUSION_MATLAB(Computation):
         else:
 
             if satellite=='snpp':
-                dummy_fusion_file = '/data/geoffc/fusion_matlab/work/local_processing/snpp_fusion_output/FSNRAD_L2_VIIRS_CRIS_SNPP.A2018283.1206.001.2019218152028.nc'
+                dummy_fusion_file = '/data/geoffc/fusion_matlab/work/local_processing/snpp_fusion_output/FSNRAD_L2_VIIRS_CRIS_SNPP.A2019218.1824.001.2019220192142.nc'
             if satellite=='noaa20':
                 dummy_fusion_file = '/data/geoffc/fusion_matlab/work/local_processing/snpp_fusion_output/VNP02FSN.A2018033.1836.001.2018058173216.nc'
 
@@ -681,14 +710,9 @@ class FUSION_MATLAB(Computation):
         '''
         Construct various metadata strings and write them to the level2 file
         '''
+        LOG.debug('Updating the metadata in {}'.format(l2_file))
 
-        #context = {}
-        #context['satellite'] = satellite
         context['nrt'] = True
-        #context['collection'] = 0
-
-        #product = sipsprod.lookup_product_recurse('FSNRAD_L2_VIIRS_CRIS', version=version)
-        #product.options['collection'] = context['collection']
 
         satname = 'SNPP' if context['satellite']=='snpp' else 'NOAA20'
         esdt = product.name + ('_SNPP' if context['satellite']=='snpp' else '_NOAA20')
@@ -698,7 +722,9 @@ class FUSION_MATLAB(Computation):
         viirs_input_fns, viirs_lut_version, viirs_lut_created = get_viirs_l1_luts(viirs_l1b_file, geo_fn=viirs_geo_file)
         ancillary_fns = []
         viirs_l1_version = product.input('viirs_l1').version
-        cris_l1_version = product.input('cris_l1').version
+
+        # Make any input version mods that aren't in the product definition...
+        cris_input_name, cris_l1_version = self.get_cris_l1b_version(product, context)
 
         set_official_product_metadata(
             esdt,
@@ -726,16 +752,26 @@ class FUSION_MATLAB(Computation):
             nc_l2.delncattr('l1_lut_version')
             nc_l2.delncattr('l1_lut_created')
             nc_l2.delncattr('input_files')
-        except:
-            pass
+            source = nc_l2.getncattr('source')
+            nc_l2.delncattr('source')
+        except Exception as err:
+            LOG.warning('There was a problem removing nc_l2 attrs in {}'.format(l2_file))
+            LOG.debug(traceback.format_exc())
+            nc_l2.close()
+            raise NCL2MetadataFailed('NetCDF4 global metadata update failed')
 
         nc_l2.close()
 
         nc_remove_unlimited_dims(basename(l2_file))
 
+        cris_l1_version += ' (NSR)' if 'nsr' in cris_input_name else ''
+        source = ', '.join(
+                ['cris_l1 {}'.format(cris_l1_version) if 'cris_l1' in x else x for x in source.split(',')]
+                ).replace('  ',' ')
+
         FIX_ATTRS = [
             ('title', '{0:} VIIRS+CrIS Fusion ({1:})'.format(satname, esdt)),
-            ('platform', {'snpp':'Suomi NPP', 'noaa20':'NOAA-20'}[context['satellite']]),
+            ('platform', {'snpp':'SUOMI-NPP', 'noaa20':'NOAA-20'}[context['satellite']]),
             ('instrument', 'VIIRS+CrIS'),
             ('conventions', 'CF-1.6, ACDD-1.3'),
             ('AlgorithmType', 'OPS'),
@@ -746,6 +782,7 @@ class FUSION_MATLAB(Computation):
             ('viirs_l1_version', viirs_l1_version),
             ('viirs_lut_version', viirs_lut_version),
             ('viirs_lut_created', str(viirs_lut_created.isoformat())),
+            ('source', source),
             ('cris_l1_version', cris_l1_version),
             ('input_files', ', '.join([basename(x) for x in [viirs_geo_file, viirs_l1b_file, cris_l1b_file]])),
             ('xmlmetadata', xmlmetadata),
@@ -858,7 +895,7 @@ class FUSION_MATLAB(Computation):
                     # Mend bowtie pixels of NASA VIIRS l1b file...
                     l1b[idx] = self.mend_viirs_l1b(product, geo[idx], l1b[idx], dummy=dummy)
 
-            collo = self.cris_viirs_collocation(product, geo, sounder, dummy=dummy)
+            collo = self.cris_viirs_collocation(product, context, geo, sounder, dummy=dummy)
 
         # Generate the AIRS/MODIS collocation
         if satellite == 'aqua':
@@ -928,6 +965,7 @@ class FUSION_MATLAB(Computation):
             raise RuntimeError('Output fusion file fusion_output.mat not created.')
 
         #kwargs['dummy'] = True # dummy
+        #kwargs['dummy'] = False # dummy
 
         # Now that we've computed the Matlab file, convert to a NetCDF file...
         if satellite=='snpp' or satellite=='noaa20':
