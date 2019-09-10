@@ -771,7 +771,7 @@ class FUSION_MATLAB(Computation):
 
         FIX_ATTRS = [
             ('title', '{0:} VIIRS+CrIS Fusion ({1:})'.format(satname, esdt)),
-            ('platform', {'snpp':'SUOMI-NPP', 'noaa20':'NOAA-20'}[context['satellite']]),
+            ('platform', {'snpp':'Suomi-NPP', 'noaa20':'NOAA-20'}[context['satellite']]),
             ('instrument', 'VIIRS+CrIS'),
             ('conventions', 'CF-1.6, ACDD-1.3'),
             ('AlgorithmType', 'OPS'),
