@@ -21,8 +21,8 @@ comp = FUSION_MATLAB()
 #granule = datetime(2015, 4, 17, 14)
 #interval = TimeInterval(granule, granule+timedelta(minutes=0))
 
-satellite, version = 'snpp', '1.0.0dev1'
-satellite, version = 'noaa20', '1.0.1dev1'
+satellite, version = 'snpp', '1.0.0'
+satellite, version = 'noaa20', '1.0.1'
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
 

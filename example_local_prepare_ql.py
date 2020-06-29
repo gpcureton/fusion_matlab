@@ -24,7 +24,7 @@ comp = FUSION_MATLAB_QL()
 satellite = 'snpp'
 #satellite = 'noaa20'
 #satellite = 'aqua'
-version = '1.0dev7' # base VIIRS level-1b
+version = '1.0.0dev0' # base VIIRS level-1b
 
 def local_execute_example(interval, satellite, version, skip_prepare=False, skip_execute=False, verbosity=2):
 

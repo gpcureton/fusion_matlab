@@ -87,6 +87,8 @@ class FusionProcessFailed(Exception):
     exit_code = 6001
 class FusionFailedToProduceMat(Exception):
     exit_code = 6002
+class FusionFailedToProducePng(Exception):
+    exit_code = 6002
 class CFConversionFailed(Exception):
     exit_code = 6003
 class CFConversionFailedToProductNC(Exception):
@@ -503,7 +505,7 @@ class FUSION_MATLAB(Computation):
 
         rc_fusion = 0
 
-        # Get the matlab runtim version that we require
+        # Get the matlab runtime version that we require
         #matlab_version = '2015b'
         matlab_version = '2018b'
         #matlab_version = product.input('fusion_matlab').options['matlab_version']
@@ -773,7 +775,7 @@ class FUSION_MATLAB(Computation):
             ('title', '{0:} VIIRS+CrIS Fusion ({1:})'.format(satname, esdt)),
             ('platform', {'snpp':'Suomi-NPP', 'noaa20':'NOAA-20'}[context['satellite']]),
             ('instrument', 'VIIRS+CrIS'),
-            ('conventions', 'CF-1.6, ACDD-1.3'),
+            #('conventions', 'CF-1.6, ACDD-1.3'),
             ('AlgorithmType', 'OPS'),
             ('long_name', '{} VIIRS+CrIS Fusion 6-Min L2 Swath 750m'.format(satname)),
             ('project', 'NASA Atmosphere Discipline'),
@@ -1040,6 +1042,7 @@ class FUSION_MATLAB_QL(Computation):
         version = product.input('viirs_l1').version
         input_name = sipsprod.satellite_esdt('V03MOD', satellite)
         interval = TimeInterval(granule, granule+timedelta(days=1.00)-timedelta(seconds=1))
+        #interval = TimeInterval(granule, granule+timedelta(days=0.01)-timedelta(seconds=1)) # DEBUG
         LOG.debug("Ingesting input {} ({}) for V02FSN_DailyQL version {}".format(input_name, version, product.version))
         vgeom = dawg_catalog.files(satellite, input_name, interval, version=version)
         if vgeom == []:
@@ -1057,19 +1060,20 @@ class FUSION_MATLAB_QL(Computation):
     def _add_cris_viirs_fusion_l1b_input(self, product, context, task):
         satellite = context['satellite']
         granule = context['granule']
-        version = product.input('FSNRAD_L2_VIIRS_CRIS').version
-        input_name = sipsprod.satellite_esdt('FSNRAD_L2_VIIRS_CRIS', satellite)
+        version = '.'.join(product.input('FSNRAD_L2_VIIRS_CRIS').version.split('.')[:-1])
+        esdt = 'FSNRAD_L2_VIIRS_CRIS' + ('_SNPP' if satellite=='snpp' else '_NOAA20')
         interval = TimeInterval(granule, granule+timedelta(days=1.00)-timedelta(seconds=1))
-        LOG.debug("Ingesting input {} ({}) for V02FSN_DailyQL version {}".format(input_name, version, product.version))
-        vl1b = dawg_catalog.files(satellite, input_name, interval, version=version)
+        #interval = TimeInterval(granule, granule+timedelta(days=0.01)-timedelta(seconds=1)) # DEBUG
+        LOG.debug("Ingesting input {} ({}) for FSNRAD_L2_VIIRS_CRIS_DailyQL version {}".format(esdt, version, product.version))
+        vl1b = dawg_catalog.files(satellite, esdt, interval, version=version)
         if vl1b == []:
             raise WorkflowNotReady('Missing {} inputs for version {} and interval {}'.format(
-                input_name, version, interval))
+                esdt, version, interval))
         elapsed_time = ((datetime.utcnow()-context['granule']).total_seconds())/86400.
-        LOG.info("After {:4.2f} days we have {} {} files ({}).".format(elapsed_time, len(vl1b), input_name, version))
+        LOG.info("After {:4.2f} days we have {} {} files ({}).".format(elapsed_time, len(vl1b), esdt, version))
         if len(vl1b) < 228 and elapsed_time < 2.:
             raise WorkflowNotReady('Number of available {} inputs is < 228, for version {} and interval {}, aborting...'.format(
-                input_name, version, interval))
+                esdt, version, interval))
         for idx, l1b_file in enumerate(vl1b):
             LOG.debug('FSNRAD_L2_VIIRS_CRIS granule {}: {} -> {}'.format(idx, l1b_file.begin_time, l1b_file.end_time))
             task.input('l1b_{}'.format(idx),  l1b_file)
@@ -1080,8 +1084,10 @@ class FUSION_MATLAB_QL(Computation):
         '''
         LOG.debug("Ingesting inputs for V02FSN_DailyQL version {} ...".format(context['version']))
 
-        # Get the product definition for 'V02FSN_DailyQL'
-        product = sipsprod.lookup_product_recurse('V02FSN_DailyQL', version=context['version'])
+        # Get the product definition for 'FSNRAD_L2_VIIRS_CRIS_DailyQL'. Different versions may use regular or bias
+        # corrected VIIRS level-1b files.
+        product_name = 'FSNRAD_L2_VIIRS_CRIS_DailyQL'
+        product = sipsprod.lookup_product_recurse(product_name, version=context['version'])
 
         # Ingest the required inputs, defined in the VNP02 product definition for context['version']
         self._add_viirs_l1b_geo_input(product, context, task)
@@ -1139,12 +1145,13 @@ class FUSION_MATLAB_QL(Computation):
         rc_fusion_ql = 0
 
         # Get the matlab runtim version that we require
-        matlab_version = '2015b'
+        #matlab_version = '2015b'
+        matlab_version = '2018b'
         #matlab_version = product.input('fusion_matlab').options['matlab_version']
 
         #run matlab
-        #cmd = '{}/{} {} {} {} {}/ {}/  >> fusion_quicklooks.log'.format(
-        cmd = '{}/{} {} {} {} {}/ {}/'.format(
+        #cmd = '{}/{} {} {} {} {}/ {}/'.format(
+        cmd = '{}/{} {} {} {} {}/ {}/  >> fusion_quicklooks.log'.format(
             bin_dir,
             fusion_ql_binary,
             support_software.lookup('matlab', matlab_version).path,
@@ -1162,7 +1169,7 @@ class FUSION_MATLAB_QL(Computation):
         except CalledProcessError as err:
             rc_fusion_ql = err.returncode
             LOG.error("Matlab binary {} returned a value of {}".format(fusion_ql_binary, rc_fusion_ql))
-            return rc_fusion_ql, []
+            raise FusionProcessFailed('Matlab binary {} failed or was killed, returning a value of {}'.format(fusion_ql_binary, rc_fusion_ql))
 
         # Move matlab file to the output directory
         orig_fusion_ql_files = glob('*.png')
@@ -1172,8 +1179,7 @@ class FUSION_MATLAB_QL(Computation):
                 ))
         else:
             LOG.error('There are no Fusion quicklook files "*.png", aborting')
-            rc_fusion_ql = 1
-            return rc_fusion_ql
+            raise FusionFailedToProducePng('Matlab QL binary {} failed to produce any PNG files.'.format(fusion_ql_binary))
 
         fusion_ql_files = []
         for orig_fusion_ql_file in orig_fusion_ql_files:
@@ -1242,16 +1248,12 @@ class FUSION_MATLAB_QL(Computation):
         geo_keys = [key for key in inputs.keys() if 'geo' in key]
         geo_inputs = {key: inputs[key] for key in geo_keys}
         symlink_inputs_to_working_dir(geo_inputs)
-        for geo_file in glob('VJ103*.nc'):
-            shutil.move(geo_file, geo_file.replace('VJ103', 'VNP03'))
         os.chdir(current_dir)
 
         os.chdir(fsn_dir)
         fsn_keys = [key for key in inputs.keys() if 'l1b' in key]
         fsn_inputs = {key: inputs[key] for key in fsn_keys}
         symlink_inputs_to_working_dir(fsn_inputs)
-        for geo_file in glob('VJ102*.nc'):
-            shutil.move(geo_file, geo_file.replace('VJ102', 'VNP02'))
         os.chdir(current_dir)
 
         # Setup the require keyword arguments for the fusion_matlab package
