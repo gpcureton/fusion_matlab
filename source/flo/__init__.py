@@ -77,8 +77,8 @@ from glutil import (
 )
 from glutil.nc import (nc_gen, nc_compress, nc_remove_unlimited_dims, nc_setattrs, nc_getattrs)
 
-from utils import create_dir
-from detect_bad_fusion import SFX, detect
+from .utils import create_dir
+from .detect_bad_fusion import SFX, detect
 
 # every module should have a LOG object
 LOG = logging.getLogger(__name__)
